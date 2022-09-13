@@ -72,6 +72,11 @@ class ASTTransformer(Builder):
             is_static_assign: A boolean value indicating whether this is a static assignment
         """
         is_local = isinstance(target, ast.Name)
+        if is_local and target.id in ctx.kernel_args:
+            raise TaichiSyntaxError(
+                f"Kernel argument \"{target.id}\" is immutable in the kernel. "
+                f"If you want to change its value, please create a new variable."
+            )
         anno = impl.expr_init(annotation)
         if is_static_assign:
             raise TaichiSyntaxError(
@@ -182,6 +187,11 @@ class ASTTransformer(Builder):
             is_static_assign: A boolean value indicating whether this is a static assignment
         """
         is_local = isinstance(target, ast.Name)
+        if is_local and target.id in ctx.kernel_args:
+            raise TaichiSyntaxError(
+                f"Kernel argument \"{target.id}\" is immutable in the kernel. "
+                f"If you want to change its value, please create a new variable."
+            )
         if is_static_assign:
             if not is_local:
                 raise TaichiSyntaxError(
@@ -526,6 +536,9 @@ class ASTTransformer(Builder):
                 kernel_arguments.decl_ret(ctx.func.return_type)
 
             for i, arg in enumerate(args.args):
+                if not isinstance(ctx.func.arguments[i].annotation,
+                                  primitive_types.RefType):
+                    ctx.kernel_args.append(arg.arg)
                 if isinstance(ctx.func.arguments[i].annotation,
                               annotations.template):
                     ctx.create_variable(arg.arg, ctx.global_vars[arg.arg])
@@ -563,16 +576,11 @@ class ASTTransformer(Builder):
                         arg.arg,
                         kernel_arguments.decl_matrix_arg(
                             ctx.func.arguments[i].annotation))
-                elif isinstance(ctx.func.arguments[i].annotation,
-                                primitive_types.RefType):
+                else:
                     ctx.create_variable(
                         arg.arg,
                         kernel_arguments.decl_scalar_arg(
                             ctx.func.arguments[i].annotation))
-                else:
-                    ctx.global_vars[
-                        arg.arg] = kernel_arguments.decl_scalar_arg(
-                            ctx.func.arguments[i].annotation)
             # remove original args
             node.args.args = []
 
@@ -731,6 +739,12 @@ class ASTTransformer(Builder):
     def build_AugAssign(ctx, node):
         build_stmt(ctx, node.target)
         build_stmt(ctx, node.value)
+        if isinstance(node.target,
+                      ast.Name) and node.target.id in ctx.kernel_args:
+            raise TaichiSyntaxError(
+                f"Kernel argument \"{node.target.id}\" is immutable in the kernel. "
+                f"If you want to change its value, please create a new variable."
+            )
         node.ptr = node.target.ptr._augassign(node.value.ptr,
                                               type(node.op).__name__)
         return node.ptr
@@ -1195,7 +1209,7 @@ class ASTTransformer(Builder):
                 build_stmts(ctx, node.orelse)
             return node
 
-        with ctx.non_static_control_flow_guard():
+        with ctx.non_static_if_guard(node):
             impl.begin_frontend_if(ctx.ast_builder, node.test.ptr)
             ctx.ast_builder.begin_frontend_if_true()
             build_stmts(ctx, node.body)
@@ -1324,6 +1338,13 @@ class ASTTransformer(Builder):
     @staticmethod
     def build_Break(ctx, node):
         if ctx.is_in_static_for():
+            nearest_non_static_if: ast.If = ctx.current_loop_scope(
+            ).nearest_non_static_if
+            if nearest_non_static_if:
+                msg = ctx.get_pos_info(nearest_non_static_if.test)
+                msg += "You are trying to `break` a static `for` loop, " \
+                       "but the `break` statement is inside a non-static `if`. "
+                raise TaichiSyntaxError(msg)
             ctx.set_loop_status(LoopStatus.Break)
         else:
             ctx.ast_builder.insert_break_stmt()
@@ -1332,6 +1353,13 @@ class ASTTransformer(Builder):
     @staticmethod
     def build_Continue(ctx, node):
         if ctx.is_in_static_for():
+            nearest_non_static_if: ast.If = ctx.current_loop_scope(
+            ).nearest_non_static_if
+            if nearest_non_static_if:
+                msg = ctx.get_pos_info(nearest_non_static_if.test)
+                msg += "You are trying to `continue` a static `for` loop, " \
+                       "but the `continue` statement is inside a non-static `if`. "
+                raise TaichiSyntaxError(msg)
             ctx.set_loop_status(LoopStatus.Continue)
         else:
             ctx.ast_builder.insert_continue_stmt()

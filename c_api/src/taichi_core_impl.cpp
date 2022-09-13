@@ -1,4 +1,5 @@
 #include "taichi_core_impl.h"
+#include "taichi_opengl_impl.h"
 #include "taichi_vulkan_impl.h"
 #include "taichi_llvm_impl.h"
 #include "taichi/program/ndarray.h"
@@ -138,6 +139,11 @@ TiRuntime ti_create_runtime(TiArch arch) {
       return (TiRuntime)(static_cast<Runtime *>(new VulkanRuntimeOwned));
     }
 #endif  // TI_WITH_VULKAN
+#ifdef TI_WITH_OPENGL
+    case TI_ARCH_OPENGL: {
+      return (TiRuntime)(static_cast<Runtime *>(new OpenglRuntime));
+    }
+#endif  // TI_WITH_OPENGL
 #ifdef TI_WITH_LLVM
     case TI_ARCH_X64: {
       return (TiRuntime)(static_cast<Runtime *>(
@@ -217,8 +223,8 @@ void ti_unmap_memory(TiRuntime runtime, TiMemory devmem) {
   runtime2->get().unmap(devmem2devalloc(*runtime2, devmem));
 }
 
-TiTexture ti_allocate_texture(TiRuntime runtime,
-                              const TiTextureAllocateInfo *allocate_info) {
+TiImage ti_allocate_image(TiRuntime runtime,
+                          const TiImageAllocateInfo *allocate_info) {
   TI_CAPI_ARGUMENT_NULL_RV(runtime);
   TI_CAPI_ARGUMENT_NULL_RV(allocate_info);
 
@@ -226,19 +232,19 @@ TiTexture ti_allocate_texture(TiRuntime runtime,
   TI_CAPI_NOT_SUPPORTED_IF_RV(allocate_info->extent.array_layer_count > 1);
 
   taichi::lang::ImageAllocUsage usage{};
-  if (allocate_info->usage & TI_TEXTURE_USAGE_STORAGE_BIT) {
+  if (allocate_info->usage & TI_IMAGE_USAGE_STORAGE_BIT) {
     usage = usage | taichi::lang::ImageAllocUsage::Storage;
   }
-  if (allocate_info->usage & TI_TEXTURE_USAGE_SAMPLED_BIT) {
+  if (allocate_info->usage & TI_IMAGE_USAGE_SAMPLED_BIT) {
     usage = usage | taichi::lang::ImageAllocUsage::Sampled;
   }
-  if (allocate_info->usage & TI_TEXTURE_USAGE_ATTACHMENT_BIT) {
+  if (allocate_info->usage & TI_IMAGE_USAGE_ATTACHMENT_BIT) {
     usage = usage | taichi::lang::ImageAllocUsage::Attachment;
   }
 
   switch ((taichi::lang::ImageDimension)allocate_info->dimension) {
 #define PER_IMAGE_DIMENSION(x) case taichi::lang::ImageDimension::x:
-#include "taichi/inc/image_dimension.inc.h"
+#include "taichi/inc/rhi_constants.inc.h"
 #undef PER_IMAGE_DIMENSION
     break;
     default: {
@@ -250,7 +256,7 @@ TiTexture ti_allocate_texture(TiRuntime runtime,
 
   switch ((taichi::lang::BufferFormat)allocate_info->format) {
 #define PER_BUFFER_FORMAT(x) case taichi::lang::BufferFormat::x:
-#include "taichi/inc/buffer_format.inc.h"
+#include "taichi/inc/rhi_constants.inc.h"
 #undef PER_BUFFER_FORMAT
     break;
     default: {
@@ -269,14 +275,23 @@ TiTexture ti_allocate_texture(TiRuntime runtime,
   params.export_sharing = false;
   params.usage = usage;
 
-  TiTexture devtex = ((Runtime *)runtime)->allocate_texture(params);
-  return devtex;
+  TiImage devimg = ((Runtime *)runtime)->allocate_image(params);
+  return devimg;
 }
-void ti_free_texture(TiRuntime runtime, TiTexture texture) {
+void ti_free_image(TiRuntime runtime, TiImage image) {
   TI_CAPI_ARGUMENT_NULL(runtime);
-  TI_CAPI_ARGUMENT_NULL(texture);
+  TI_CAPI_ARGUMENT_NULL(image);
 
-  ((Runtime *)runtime)->free_texture(texture);
+  ((Runtime *)runtime)->free_image(image);
+}
+
+TiSampler ti_create_sampler(TiRuntime runtime,
+                            const TiSamplerCreateInfo *create_info) {
+  TI_CAPI_NOT_SUPPORTED(ti_create_sampler);
+  return TI_NULL_HANDLE;
+}
+void ti_destroy_sampler(TiRuntime runtime, TiSampler sampler) {
+  TI_CAPI_NOT_SUPPORTED(ti_destroy_sampler);
 }
 
 TiEvent ti_create_event(TiRuntime runtime) {
@@ -313,13 +328,13 @@ void ti_copy_memory_device_to_device(TiRuntime runtime,
 }
 
 void ti_copy_texture_device_to_device(TiRuntime runtime,
-                                      const TiTextureSlice *dst_texture,
-                                      const TiTextureSlice *src_texture) {
+                                      const TiImageSlice *dst_texture,
+                                      const TiImageSlice *src_texture) {
   TI_CAPI_ARGUMENT_NULL(runtime);
   TI_CAPI_ARGUMENT_NULL(dst_texture);
-  TI_CAPI_ARGUMENT_NULL(dst_texture->texture);
+  TI_CAPI_ARGUMENT_NULL(dst_texture->image);
   TI_CAPI_ARGUMENT_NULL(src_texture);
-  TI_CAPI_ARGUMENT_NULL(src_texture->texture);
+  TI_CAPI_ARGUMENT_NULL(src_texture->image);
   TI_CAPI_INVALID_ARGUMENT(src_texture->extent.width !=
                            dst_texture->extent.width);
   TI_CAPI_INVALID_ARGUMENT(src_texture->extent.height !=
@@ -330,8 +345,8 @@ void ti_copy_texture_device_to_device(TiRuntime runtime,
                            dst_texture->extent.array_layer_count);
 
   Runtime *runtime2 = (Runtime *)runtime;
-  auto dst = devtex2devalloc(*runtime2, dst_texture->texture);
-  auto src = devtex2devalloc(*runtime2, src_texture->texture);
+  auto dst = devimg2devalloc(*runtime2, dst_texture->image);
+  auto src = devimg2devalloc(*runtime2, src_texture->image);
 
   taichi::lang::ImageCopyParams params{};
   params.width = dst_texture->extent.width;
@@ -340,18 +355,18 @@ void ti_copy_texture_device_to_device(TiRuntime runtime,
   runtime2->copy_image(dst, src, params);
 }
 void ti_transition_texture(TiRuntime runtime,
-                           TiTexture texture,
-                           TiTextureLayout layout) {
+                           TiImage texture,
+                           TiImageLayout layout) {
   TI_CAPI_ARGUMENT_NULL(runtime);
   TI_CAPI_ARGUMENT_NULL(texture);
 
   Runtime *runtime2 = (Runtime *)runtime;
-  auto image = devtex2devalloc(*runtime2, texture);
+  auto image = devimg2devalloc(*runtime2, texture);
   auto layout2 = (taichi::lang::ImageLayout)layout;
 
   switch ((taichi::lang::ImageLayout)layout) {
 #define PER_IMAGE_LAYOUT(x) case taichi::lang::ImageLayout::x:
-#include "taichi/inc/image_layout.inc.h"
+#include "taichi/inc/rhi_constants.inc.h"
 #undef PER_IMAGE_LAYOUT
     break;
     default: {
@@ -455,6 +470,10 @@ void ti_launch_kernel(TiRuntime runtime,
         devallocs.emplace_back(std::move(devalloc));
         break;
       }
+      case TI_ARGUMENT_TYPE_TEXTURE: {
+        ti_set_last_error(TI_ERROR_NOT_SUPPORTED, "TI_ARGUMENT_TYPE_TEXTURE");
+        break;
+      }
       default: {
         ti_set_last_error(TI_ERROR_ARGUMENT_OUT_OF_RANGE,
                           ("args[" + std::to_string(i) + "].type").c_str());
@@ -479,6 +498,8 @@ void ti_launch_compute_graph(TiRuntime runtime,
   std::unordered_map<std::string, taichi::lang::aot::IValue> arg_map{};
   std::vector<taichi::lang::Ndarray> ndarrays;
   ndarrays.reserve(arg_count);
+  std::vector<taichi::lang::Texture> textures;
+  textures.reserve(arg_count);
 
   for (uint32_t i = 0; i < arg_count; ++i) {
     TI_CAPI_ARGUMENT_NULL(args[i].name);
@@ -566,6 +587,23 @@ void ti_launch_compute_graph(TiRuntime runtime,
         ndarrays.emplace_back(taichi::lang::Ndarray(devalloc, dtype, shape));
         arg_map.emplace(std::make_pair(
             arg.name, taichi::lang::aot::IValue::create(ndarrays.back())));
+        break;
+      }
+      case TI_ARGUMENT_TYPE_TEXTURE: {
+        TI_CAPI_ARGUMENT_NULL(args[i].argument.value.texture.image);
+
+        taichi::lang::DeviceAllocation devalloc =
+            devimg2devalloc(runtime2, arg.argument.value.texture.image);
+        taichi::lang::BufferFormat format =
+            (taichi::lang::BufferFormat)arg.argument.value.texture.format;
+        uint32_t width = arg.argument.value.texture.extent.width;
+        uint32_t height = arg.argument.value.texture.extent.height;
+        uint32_t depth = arg.argument.value.texture.extent.depth;
+
+        textures.emplace_back(
+            taichi::lang::Texture(devalloc, format, width, height, depth));
+        arg_map.emplace(std::make_pair(
+            arg.name, taichi::lang::aot::IValue::create(textures.back())));
         break;
       }
       default: {

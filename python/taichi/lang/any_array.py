@@ -14,17 +14,27 @@ class AnyArray:
         element_shape (Tuple[Int]): () if scalar elements (default), (n) if vector elements, and (n, m) if matrix elements.
         layout (Layout): Memory layout.
     """
-    def __init__(self, ptr, element_shape, layout):
-        assert ptr.is_external_var()
+    def __init__(self, ptr):
+        assert ptr.is_external_tensor_expr()
         self.ptr = ptr
-        self.element_shape = element_shape
-        self.layout = layout
+        self.ptr.type_check(impl.get_runtime().prog.config)
+
+    def element_shape(self):
+        return _ti_core.get_external_tensor_element_shape(self.ptr)
+
+    def layout(self):
+        # 0: scalar; 1: vector (SOA); 2: matrix (SOA); -1: vector
+        # (AOS); -2: matrix (AOS)
+        element_dim = _ti_core.get_external_tensor_element_dim(self.ptr)
+        if element_dim == 1 or element_dim == 2:
+            return Layout.SOA
+        return Layout.AOS
 
     def get_type(self):
         return NdarrayTypeMetadata(
             self.ptr.get_ret_type(),
             None,  # AnyArray can take any shape
-            self.layout)
+            self.layout())
 
     @property
     @taichi_scope
@@ -39,17 +49,15 @@ class AnyArray:
             Expr(_ti_core.get_external_tensor_shape_along_axis(self.ptr, i))
             for i in range(dim)
         ]
-        element_dim = len(self.element_shape)
+        element_dim = len(self.element_shape())
         if element_dim == 0:
             return ret
-        return ret[
-            element_dim:] if self.layout == Layout.SOA else ret[:-element_dim]
+        return ret[element_dim:] if self.layout(
+        ) == Layout.SOA else ret[:-element_dim]
 
     @taichi_scope
     def _loop_range(self):
         """Gets the corresponding taichi_python.Expr to serve as loop range.
-
-        This is not in use now because struct fors on AnyArrays are not supported yet.
 
         Returns:
             taichi_python.Expr: See above.
@@ -70,8 +78,9 @@ class AnyArrayAccess:
 
     @taichi_scope
     def subscript(self, i, j):
-        indices_second = (i, ) if len(self.arr.element_shape) == 1 else (i, j)
-        if self.arr.layout == Layout.SOA:
+        indices_second = (i, ) if len(self.arr.element_shape()) == 1 else (i,
+                                                                           j)
+        if self.arr.layout() == Layout.SOA:
             indices = indices_second + self.indices_first
         else:
             indices = self.indices_first + indices_second
