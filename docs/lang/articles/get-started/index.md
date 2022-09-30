@@ -14,9 +14,9 @@ Taichi's built-in ahead-of-time (AOT) system also allows you to export your code
 
 ## Prerequisites
 
-1. Python: 3.7/3.8/3.9/3.10 (64-bit)
-2. OS: Windows, OS X, and Linux (64-bit)
-3. Supported GPU backends (optional): CUDA, Vulkan, OpenGL, Metal, and DirectX 11
+- Python: 3.7/3.8/3.9/3.10 (64-bit)
+- OS: Windows, OS X, and Linux (64-bit)
+- Supported GPU backends (optional): CUDA, Vulkan, OpenGL, Metal, and DirectX 11
 
 ## Installation
 
@@ -25,9 +25,8 @@ Taichi is available as a PyPI package:
 ```bash
 pip install taichi
 ```
-You can also build Taichi from source: See our [developer's guide](../contribution/dev_install.md) for full details. We *do not* advise you to do so if you are a first-time user, unless you want to experience the most up-to-date features.
 
-To verify a successful installation, run the following command in the terminal:
+To verify a successful installation, run the following command in your terminal:
 
 ```bash
 ti gallery
@@ -156,9 +155,9 @@ This is a `for` loop at the outermost scope in a Taichi kernel and thus is *auto
 
 Taichi offers a handy syntax sugar: It parallelizes any `for` loop at the outermost scope in a kernel. This means that you can parallelize your tasks using just one plain loop, without the need to know what is going on under the hood, be it thread allocation/recycling or memory management.
 
-Note that the field `pixels` is treated as an iterator. As the indices of the field elements, `i` and `j` are integers falling in the ranges `[0, 2*n-1]` and `[0, n-1]`, respectively. They are arranged in the row-majored order, i.e., `(0, 0)`, `(0, 1)`, ..., `(0, n-1)`, `(1, n-1)`, ..., `(2*n-1, n-1)`.
+Note that the field `pixels` is treated as an iterator. As the indices of the field elements, `i` and `j` are integers falling in the ranges `[0, 2*n-1]` and `[0, n-1]`, respectively. The pair `(i, j)` loops over the set `(0, 0)`, `(0, 1)`, ..., `(0, n-1)`, `(1, n-1)`, ..., `(2*n-1, n-1)`.
 
-You should keep it in mind that the *for loops not at the outermost scope will not be parallelized*; they are handled serially:
+Keep in mind that the *for loops not at the outermost scope will not be parallelized*; they are handled serially:
 
 ```python {3,7,14-15}
 @ti.kernel

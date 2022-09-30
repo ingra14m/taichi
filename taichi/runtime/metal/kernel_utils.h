@@ -16,8 +16,7 @@
 // compiled to more than one Metal compute kernels. Concretely, each offloaded
 // task in the Taichi kernel maps to a Metal kernel.
 
-namespace taichi {
-namespace lang {
+namespace taichi::lang {
 
 class Kernel;
 class SNode;
@@ -28,7 +27,9 @@ namespace metal {
 class PrintStringTable {
  public:
   int put(const std::string &str);
-  const std::string &get(int i);
+  const std::string &get(int i) const;
+
+  TI_IO_DEF(strs_);
 
  private:
   std::vector<std::string> strs_;
@@ -280,8 +281,9 @@ struct CompiledKernelData {
   std::string source_code;
   KernelContextAttributes ctx_attribs;
   TaichiKernelAttributes kernel_attribs;
+  PrintStringTable print_str_table;
 
-  TI_IO_DEF(kernel_name, ctx_attribs, kernel_attribs);
+  TI_IO_DEF(kernel_name, ctx_attribs, kernel_attribs, print_str_table);
 };
 
 struct CompiledKernelTmplData {
@@ -322,5 +324,4 @@ struct BufferMetaData {
 };
 
 }  // namespace metal
-}  // namespace lang
-}  // namespace taichi
+}  // namespace taichi::lang

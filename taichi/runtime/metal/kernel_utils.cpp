@@ -7,8 +7,7 @@
 #include "taichi/program/context.h"
 #undef TI_RUNTIME_HOST
 
-namespace taichi {
-namespace lang {
+namespace taichi::lang {
 
 namespace metal {
 
@@ -23,7 +22,7 @@ int PrintStringTable::put(const std::string &str) {
   return i;
 }
 
-const std::string &PrintStringTable::get(int i) {
+const std::string &PrintStringTable::get(int i) const {
   return strs_[i];
 }
 
@@ -164,5 +163,4 @@ KernelContextAttributes::KernelContextAttributes(const Kernel &kernel)
 
 }  // namespace metal
 
-}  // namespace lang
-}  // namespace taichi
+}  // namespace taichi::lang

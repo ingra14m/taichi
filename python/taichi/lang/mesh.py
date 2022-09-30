@@ -67,7 +67,8 @@ class MeshReorderedMatrixFieldProxy(MatrixField):
         self.grad = field.grad
         self.n = field.n
         self.m = field.m
-        self.dynamic_index_stride = field.dynamic_index_stride
+        self.ndim = field.ndim
+        self.ptr = field.ptr
 
         self.mesh_ptr = mesh_ptr
         self.element_type = element_type
@@ -699,7 +700,7 @@ class MeshRelationAccessProxy:
         entry_expr = self.mesh.get_relation_access(self.from_index,
                                                    self.to_element_type,
                                                    impl.Expr(indices[0]).ptr)
-        entry_expr.type_check(impl.get_runtime().prog.config)
+        entry_expr.type_check(impl.get_runtime().prog.config())
         return MeshElementFieldProxy(self.mesh, self.to_element_type,
                                      entry_expr)
 

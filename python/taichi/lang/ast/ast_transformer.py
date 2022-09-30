@@ -15,8 +15,9 @@ from taichi.lang.ast.ast_transformer_utils import (Builder, LoopStatus,
 from taichi.lang.ast.symbol_resolver import ASTResolver
 from taichi.lang.exception import TaichiSyntaxError, TaichiTypeError
 from taichi.lang.field import Field
+from taichi.lang.impl import current_cfg
 from taichi.lang.matrix import (Matrix, MatrixType, Vector, _PyScopeMatrixImpl,
-                                _TiScopeMatrixImpl)
+                                _TiScopeMatrixImpl, make_matrix)
 from taichi.lang.snode import append
 from taichi.lang.util import in_taichi_scope, is_taichi_class, to_taichi_type
 from taichi.types import (annotations, ndarray_type, primitive_types,
@@ -114,6 +115,9 @@ class ASTTransformer(Builder):
     @staticmethod
     def build_assign_slice(ctx, node_target, values, is_static_assign):
         target = ASTTransformer.build_Subscript(ctx, node_target, get_ref=True)
+        if current_cfg().real_matrix and isinstance(values, (list, tuple)):
+            values = make_matrix(values)
+
         if isinstance(node_target.value.ptr, Matrix):
             if isinstance(node_target.value.ptr._impl, _TiScopeMatrixImpl):
                 target._assign(values)
@@ -670,10 +674,13 @@ class ASTTransformer(Builder):
                         ti_ops.cast(expr.Expr(node.value.ptr),
                                     ctx.func.return_type).ptr))
             elif isinstance(ctx.func.return_type, MatrixType):
+                item_iter = iter(node.value.ptr.to_list())\
+                            if isinstance(node.value.ptr, Vector) or node.value.ptr.ndim == 1\
+                            else itertools.chain.from_iterable(node.value.ptr.to_list())
                 ctx.ast_builder.create_kernel_exprgroup_return(
                     expr.make_expr_group([
-                        ti_ops.cast(exp, ctx.func.return_type.dtype) for exp in
-                        itertools.chain.from_iterable(node.value.ptr.to_list())
+                        ti_ops.cast(exp, ctx.func.return_type.dtype)
+                        for exp in item_iter
                     ]))
             else:
                 raise TaichiSyntaxError(
@@ -1107,13 +1114,13 @@ class ASTTransformer(Builder):
             loop_var = expr.Expr(ctx.ast_builder.make_id_expr(''))
             ctx.create_variable(loop_name, loop_var)
             begin = expr.Expr(0)
-            end = node.iter.ptr.size
+            end = ti_ops.cast(node.iter.ptr.size, primitive_types.i32)
             ctx.ast_builder.begin_frontend_range_for(loop_var.ptr, begin.ptr,
                                                      end.ptr)
             entry_expr = _ti_core.get_relation_access(
                 ctx.mesh.mesh_ptr, node.iter.ptr.from_index.ptr,
                 node.iter.ptr.to_element_type, loop_var.ptr)
-            entry_expr.type_check(impl.get_runtime().prog.config)
+            entry_expr.type_check(impl.get_runtime().prog.config())
             mesh_idx = mesh.MeshElementFieldProxy(
                 ctx.mesh, node.iter.ptr.to_element_type, entry_expr)
             ctx.create_variable(target, mesh_idx)

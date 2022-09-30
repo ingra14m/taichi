@@ -355,24 +355,21 @@ class TaichiCallableTemplateMapper:
                 return arg.dtype, len(arg.shape), (), Layout.AOS
             if isinstance(arg, taichi.lang.matrix.VectorNdarray):
                 anno.check_matched(arg.get_type())
-                return arg.dtype, len(arg.shape) + 1, (arg.n, ), arg.layout
+                return arg.dtype, len(arg.shape) + 1, (arg.n, ), Layout.AOS
             if isinstance(arg, taichi.lang.matrix.MatrixNdarray):
                 anno.check_matched(arg.get_type())
                 return arg.dtype, len(arg.shape) + 2, (arg.n,
-                                                       arg.m), arg.layout
+                                                       arg.m), Layout.AOS
             # external arrays
             element_dim = 0 if anno.element_dim is None else anno.element_dim
-            layout = Layout.AOS if anno.layout is None else anno.layout
             shape = tuple(arg.shape)
             if len(shape) < element_dim:
                 raise ValueError(
                     f"Invalid argument into ti.types.ndarray() - required element_dim={element_dim}, "
                     f"but the argument has only {len(shape)} dimensions")
-            element_shape = (
-            ) if element_dim == 0 else shape[:
-                                             element_dim] if layout == Layout.SOA else shape[
-                                                 -element_dim:]
-            return to_taichi_type(arg.dtype), len(shape), element_shape, layout
+            element_shape = () if element_dim == 0 else shape[-element_dim:]
+            return to_taichi_type(
+                arg.dtype), len(shape), element_shape, Layout.AOS
         if isinstance(anno, sparse_matrix_builder):
             return arg.dtype
         # Use '#' as a placeholder because other kinds of arguments are not involved in template instantiation
@@ -572,7 +569,7 @@ class Kernel:
                 "Non contiguous tensors are not supported, please call tensor.contiguous() before passing it into taichi kernel."
             )
         tmp = v
-        taichi_arch = self.runtime.prog.config.arch
+        taichi_arch = self.runtime.prog.config().arch
 
         if str(v.device).startswith('cuda'):
             # External tensor on cuda
@@ -596,7 +593,7 @@ class Kernel:
         assert isinstance(v, paddle.Tensor)
 
         tmp = v.value().get_tensor()
-        taichi_arch = self.runtime.prog.config.arch
+        taichi_arch = self.runtime.prog.config().arch
 
         if v.place.is_gpu_place():
             # External tensor on cuda

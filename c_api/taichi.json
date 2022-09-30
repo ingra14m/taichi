@@ -93,7 +93,8 @@
                         "argument_null": -5,
                         "argument_out_of_range": -6,
                         "argument_not_found": -7,
-                        "invalid_interop": -8
+                        "invalid_interop": -8,
+                        "invalid_state": -9
                     }
                 },
                 {
@@ -300,6 +301,10 @@
                         {
                             "name": "format",
                             "type": "enumeration.format"
+                        },
+                        {
+                            "name": "export_sharing",
+                            "type": "alias.bool"
                         },
                         {
                             "name": "usage",
@@ -670,6 +675,23 @@
                     ]
                 },
                 {
+                    "name": "track_image",
+                    "type": "function",
+                    "is_extension": true,
+                    "parameters": [
+                        {
+                            "type": "handle.runtime"
+                        },
+                        {
+                            "type": "handle.image"
+                        },
+                        {
+                            "name": "layout",
+                            "type": "enumeration.image_layout"
+                        }
+                    ]
+                },
+                {
                     "name": "transition_image",
                     "type": "function",
                     "is_device_command": true,
@@ -860,6 +882,10 @@
                     "name": "vulkan_runtime_interop_info",
                     "type": "structure",
                     "fields": [
+                        {
+                            "name": "get_instance_proc_addr",
+                            "type": "PFN_vkGetInstanceProcAddr"
+                        },
                         {
                             "name": "api_version",
                             "type": "uint32_t"

@@ -8,7 +8,7 @@
 #include "taichi/program/function.h"
 #include "taichi/program/kernel.h"
 
-TLANG_NAMESPACE_BEGIN
+namespace taichi::lang {
 
 namespace irpass {
 namespace {
@@ -51,6 +51,17 @@ void compile_to_offloads(IRNode *ir,
     irpass::lower_ast(ir);
     print("Lowered");
   }
+
+  if (config.real_matrix && config.real_matrix_scalarize) {
+    irpass::scalarize(ir);
+
+    // Remove redundant MatrixInitStmt inserted during scalarization
+    irpass::die(ir);
+    print("Scalarized");
+  }
+
+  irpass::lower_matrix_ptr(ir);
+  print("Matrix ptr lowered");
 
   irpass::type_check(ir, config);
   print("Typechecked");
@@ -133,7 +144,8 @@ void compile_to_offloads(IRNode *ir,
   // TODO: This pass may be redundant as cfg_optimization() is already called
   //  in full_simplify().
   if (config.opt_level > 0 && config.cfg_optimization) {
-    irpass::cfg_optimization(ir, false, /*autodiff_enabled*/ false);
+    irpass::cfg_optimization(ir, false, /*autodiff_enabled*/ false,
+                             config.real_matrix);
     print("Optimized by CFG");
     irpass::analysis::verify(ir);
   }
@@ -177,6 +189,10 @@ void offload_to_executable(IRNode *ir,
   irpass::demote_atomics(ir, config);
   print("Atomics demoted I");
   irpass::analysis::verify(ir);
+  if (config.cache_loop_invariant_global_vars) {
+    irpass::cache_loop_invariant_global_vars(ir, config);
+    print("Cache loop-invariant global vars");
+  }
 
   if (config.demote_dense_struct_fors) {
     irpass::demote_dense_struct_fors(ir, config.packed);
@@ -237,6 +253,9 @@ void offload_to_executable(IRNode *ir,
   irpass::analysis::verify(ir);
 
   if (lower_global_access) {
+    irpass::full_simplify(ir, config,
+                          {false, /*autodiff_enabled*/ false, kernel->program});
+    print("Simplified before lower access");
     irpass::lower_access(ir, config, {kernel->no_activate, true});
     print("Access lowered");
     irpass::analysis::verify(ir);
@@ -316,6 +335,7 @@ void compile_function(IRNode *ir,
     irpass::lower_ast(ir);
     print("Lowered");
   }
+
   irpass::lower_access(ir, config, {{}, true});
   print("Access lowered");
   irpass::analysis::verify(ir);
@@ -331,6 +351,9 @@ void compile_function(IRNode *ir,
   irpass::type_check(ir, config);
   print("Typechecked");
 
+  irpass::demote_operations(ir, config);
+  print("Operations demoted");
+
   irpass::full_simplify(
       ir, config, {false, autodiff_mode != AutodiffMode::kNone, func->program});
   print("Simplified");
@@ -339,4 +362,4 @@ void compile_function(IRNode *ir,
 
 }  // namespace irpass
 
-TLANG_NAMESPACE_END
+}  // namespace taichi::lang

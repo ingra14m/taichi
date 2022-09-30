@@ -1,4 +1,5 @@
 #pragma once
+#include <exception>
 #include "taichi/taichi_core.h"
 #include "taichi/aot/module_loader.h"
 #include "taichi/rhi/device.h"
@@ -10,6 +11,17 @@
 #undef TI_RUNTIME_HOST
 
 // Error reporting.
+#define TI_CAPI_INCOMPLETE(x) ti_set_last_error(TI_ERROR_INCOMPLETE, #x);
+#define TI_CAPI_INCOMPLETE_IF(x)                \
+  if (x) {                                      \
+    ti_set_last_error(TI_ERROR_INCOMPLETE, #x); \
+  }
+#define TI_CAPI_INCOMPLETE_IF_RV(x)             \
+  if (x) {                                      \
+    ti_set_last_error(TI_ERROR_INCOMPLETE, #x); \
+    return TI_NULL_HANDLE;                      \
+  }
+
 #define TI_CAPI_NOT_SUPPORTED(x) ti_set_last_error(TI_ERROR_NOT_SUPPORTED, #x);
 #define TI_CAPI_NOT_SUPPORTED_IF(x)                \
   if (x) {                                         \
@@ -54,6 +66,19 @@
     return TI_NULL_HANDLE;                                       \
   }
 
+#define TI_CAPI_TRY_CATCH_BEGIN() try {
+#define TI_CAPI_TRY_CATCH_END()                                 \
+  }                                                             \
+  catch (const std::exception &e) {                             \
+    ti_set_last_error(TI_ERROR_INVALID_STATE, e.what());        \
+  }                                                             \
+  catch (const std::string &e) {                                \
+    ti_set_last_error(TI_ERROR_INVALID_STATE, e.c_str());       \
+  }                                                             \
+  catch (...) {                                                 \
+    ti_set_last_error(TI_ERROR_INVALID_STATE, "c++ exception"); \
+  }
+
 class Runtime;
 class Context;
 class AotModule;
@@ -91,6 +116,13 @@ class Runtime {
   virtual void copy_image(const taichi::lang::DeviceAllocation &dst,
                           const taichi::lang::DeviceAllocation &src,
                           const taichi::lang::ImageCopyParams &params) {
+    TI_NOT_IMPLEMENTED
+  }
+  virtual void track_image(const taichi::lang::DeviceAllocation &image,
+                           taichi::lang::ImageLayout layout) {
+    TI_NOT_IMPLEMENTED
+  }
+  virtual void untrack_image(const taichi::lang::DeviceAllocation &image) {
     TI_NOT_IMPLEMENTED
   }
   virtual void transition_image(const taichi::lang::DeviceAllocation &image,

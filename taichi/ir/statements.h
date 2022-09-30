@@ -8,8 +8,7 @@
 
 #include <optional>
 
-namespace taichi {
-namespace lang {
+namespace taichi::lang {
 
 class Function;
 
@@ -346,40 +345,59 @@ class GlobalPtrStmt : public Stmt {
 };
 
 /**
- * An accessing tensor element operation.
+ * An "abstract" pointer for an element of a MatrixField, which logically
+ * contains a matrix of GlobalPtrStmts. Upon construction, only snodes, indices,
+ * dynamic_indexable, dynamic_index_stride and activate are initialized. After
+ * the lower_matrix_ptr pass, this stmt will either be eliminated (constant
+ * index) or have ptr_base initialized (dynamic index or whole-matrix access).
  */
-class PtrOffsetStmt : public Stmt {
+class MatrixOfGlobalPtrStmt : public Stmt {
+ public:
+  std::vector<SNode *> snodes;
+  std::vector<Stmt *> indices;
+  Stmt *ptr_base{nullptr};
+  bool dynamic_indexable{false};
+  int dynamic_index_stride{0};
+  bool activate{true};
+
+  MatrixOfGlobalPtrStmt(const std::vector<SNode *> &snodes,
+                        const std::vector<Stmt *> &indices,
+                        bool dynamic_indexable,
+                        int dynamic_index_stride,
+                        DataType dt,
+                        bool activate = true);
+
+  bool has_global_side_effect() const override {
+    return activate;
+  }
+
+  bool common_statement_eliminable() const override {
+    return true;
+  }
+
+  TI_STMT_DEF_FIELDS(ret_type,
+                     snodes,
+                     indices,
+                     ptr_base,
+                     dynamic_indexable,
+                     dynamic_index_stride,
+                     activate);
+  TI_DEFINE_ACCEPT_AND_CLONE
+};
+
+/**
+ * A pointer to an element of a matrix.
+ */
+class MatrixPtrStmt : public Stmt {
  public:
   Stmt *origin{nullptr};
   Stmt *offset{nullptr};
 
-  PtrOffsetStmt(Stmt *, Stmt *);
+  MatrixPtrStmt(Stmt *, Stmt *);
 
-  /* TODO(zhanlue/yi) Stop using llvm::AllocaInst with "ArraySize" argument so
-     that Alloca can return ArrayType.
+  /* TODO(zhanlue/yi): Unify semantics of offset in MatrixPtrStmt
 
-      Currently, AllocaStmt and GlobalTemporaryStmt uses llvm::AllocaInst with
-     "ArraySize" argument, which returns a pointer to the first element of the
-     array, instead of the array itself.
-
-      We would like to refactor this behaviour because:
-      1. It drops the array type information.
-      2. Causes crash on AMDGPU backend in certain circumstances.
-
-      https://llvm.org/doxygen/classllvm_1_1AllocaInst.html#ac68a7586b8be7de3c39531d9eca902e6
-  */
-  bool tensor_type_represented_as_primitive_type_ptr() const {
-    if (origin->ret_type->is<TensorType>()) {
-      if (origin->is<AllocaStmt>() || origin->is<GlobalTemporaryStmt>()) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /* TODO(zhanlue/yi): Unify semantics of offset in PrtOffsetStmt
-
-    There is a hack in PtrOffsetStmt in terms of the semantics of "offset",
+    There is a hack in MatrixPtrStmt in terms of the semantics of "offset",
     where "offset" can be interpreted as "number of bytes" or "index" in
     different upper-level code paths
 
@@ -390,7 +408,7 @@ class PtrOffsetStmt : public Stmt {
     if (origin->is<AllocaStmt>() || origin->is<GlobalTemporaryStmt>() ||
         origin->is<ExternalPtrStmt>()) {
       TI_ASSERT_INFO(origin->ret_type.ptr_removed()->is<TensorType>(),
-                     "PtrOffsetStmt can only be used for TensorType.");
+                     "MatrixPtrStmt can only be used for TensorType.");
       return true;
     }
     return false;
@@ -645,8 +663,8 @@ class LocalStoreStmt : public Stmt {
 
   LocalStoreStmt(Stmt *dest, Stmt *val) : dest(dest), val(val) {
     TI_ASSERT(dest->is<AllocaStmt>() ||
-              (dest->is<PtrOffsetStmt>() &&
-               dest->cast<PtrOffsetStmt>()->offset_used_as_index()));
+              (dest->is<MatrixPtrStmt>() &&
+               dest->cast<MatrixPtrStmt>()->offset_used_as_index()));
     TI_STMT_REG_FIELDS;
   }
 
@@ -1796,9 +1814,12 @@ class MatrixInitStmt : public Stmt {
     TI_STMT_REG_FIELDS;
   }
 
+  bool has_global_side_effect() const override {
+    return false;
+  }
+
   TI_STMT_DEF_FIELDS(ret_type, values);
   TI_DEFINE_ACCEPT_AND_CLONE
 };
 
-}  // namespace lang
-}  // namespace taichi
+}  // namespace taichi::lang

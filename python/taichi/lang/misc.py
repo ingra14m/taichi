@@ -347,7 +347,6 @@ def init(arch=None,
     # changed by the Vulkan backend initialization on OS X.
     current_dir = os.getcwd()
 
-    cfg = impl.default_cfg()
     # Check if installed version meets the requirements.
     if require_version is not None:
         check_require_version(require_version)
@@ -363,6 +362,9 @@ def init(arch=None,
     default_ip = _deepcopy(default_ip)
     kwargs = _deepcopy(kwargs)
     reset()
+
+    cfg = impl.default_cfg()
+    cfg.offline_cache = True  # Enable offline cache in frontend instead of C++ side
 
     spec_cfg = _SpecialConfig()
     env_comp = _EnvironmentConfigurator(kwargs, cfg)
@@ -594,10 +596,10 @@ def _block_dim(dim):
 def _block_dim_adaptive(block_dim_adaptive):
     """Enable/Disable backends set block_dim adaptively.
     """
-    if get_runtime().prog.config.arch != cpu:
+    if get_runtime().prog.config().arch != cpu:
         _logging.warn('Adaptive block_dim is supported on CPU backend only')
     else:
-        get_runtime().prog.config.cpu_block_dim_adaptive = block_dim_adaptive
+        get_runtime().prog.config().cpu_block_dim_adaptive = block_dim_adaptive
 
 
 def _bit_vectorize():

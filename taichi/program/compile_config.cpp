@@ -2,7 +2,7 @@
 
 #include <thread>
 
-TLANG_NAMESPACE_BEGIN
+namespace taichi::lang {
 
 CompileConfig::CompileConfig() {
   arch = host_arch();
@@ -49,6 +49,7 @@ CompileConfig::CompileConfig() {
   ndarray_use_cached_allocator = true;
   use_mesh = false;
   real_matrix = false;
+  real_matrix_scalarize = false;
 
   saturating_grid_dim = 0;
   max_block_dim = 0;
@@ -70,4 +71,4 @@ CompileConfig::CompileConfig() {
   cc_link_cmd = "gcc -shared -fPIC -o '{}' '{}'";
 }
 
-TLANG_NAMESPACE_END
+}  // namespace taichi::lang

@@ -11,8 +11,7 @@
 #include "taichi/util/offline_cache.h"
 #include "taichi/codegen/llvm/llvm_compiled_data.h"
 
-namespace taichi {
-namespace lang {
+namespace taichi::lang {
 
 struct LlvmOfflineCache {
   using Version = uint16[3];  // {MAJOR, MINOR, PATCH}
@@ -100,6 +99,7 @@ struct LlvmOfflineCache {
   std::unordered_map<std::string, KernelCacheData>
       kernels;  // key = kernel_name
 
+  // NOTE: The "version" must be the first field to be serialized
   TI_IO_DEF(version, size, fields, kernels);
 };
 
@@ -177,6 +177,5 @@ class LlvmOfflineCacheFileWriter {
   bool mangled_{false};
 };
 
-}  // namespace lang
-}  // namespace taichi
+}  // namespace taichi::lang
 #endif  // TI_WITH_LLVM

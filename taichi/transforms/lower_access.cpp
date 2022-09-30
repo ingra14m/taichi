@@ -11,8 +11,7 @@
 #include <deque>
 #include <set>
 
-namespace taichi {
-namespace lang {
+namespace taichi::lang {
 namespace {
 
 class LowerAccess;
@@ -130,7 +129,7 @@ class LowerAccess : public IRVisitor {
   }
 
   // TODO: this seems to be redundant
-  void visit(PtrOffsetStmt *stmt) override {
+  void visit(MatrixPtrStmt *stmt) override {
     if (!stmt->is_unlowered_global_ptr())
       return;
     auto ptr = stmt->origin->as<GlobalPtrStmt>();
@@ -297,5 +296,4 @@ bool lower_access(IRNode *root,
 }
 
 }  // namespace irpass
-}  // namespace lang
-}  // namespace taichi
+}  // namespace taichi::lang

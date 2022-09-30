@@ -7,8 +7,7 @@
 #include "taichi/codegen/spirv/spirv_codegen.h"
 #include "taichi/runtime/gfx/aot_graph_data.h"
 
-namespace taichi {
-namespace lang {
+namespace taichi::lang {
 namespace gfx {
 
 namespace {
@@ -29,6 +28,7 @@ class AotDataConverter {
       res.kernels[ker.name] = val;
     }
     res.fields = in.fields;
+    res.required_caps = in.required_caps;
     res.root_buffer_size = in.root_buffer_size;
     return res;
   }
@@ -110,6 +110,7 @@ AotModuleBuilderImpl::AotModuleBuilderImpl(
   aot_target_device_ =
       target_device ? std::move(target_device)
                     : std::make_unique<aot::TargetDevice>(device_api_backend_);
+  aot_target_device_->clone_caps(ti_aot_data_.required_caps);
   if (!compiled_structs.empty()) {
     ti_aot_data_.root_buffer_size = compiled_structs[0].root_size;
   }
@@ -254,5 +255,4 @@ void AotModuleBuilderImpl::add_per_backend_tmpl(const std::string &identifier,
 }
 
 }  // namespace gfx
-}  // namespace lang
-}  // namespace taichi
+}  // namespace taichi::lang
