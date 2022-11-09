@@ -1,6 +1,7 @@
 #include "taichi/aot/graph_data.h"
 #include "taichi/program/ndarray.h"
 #include "taichi/program/texture.h"
+#include "taichi/program/kernel.h"
 
 #include <numeric>
 
@@ -12,7 +13,7 @@ void CompiledGraph::run(
   for (const auto &dispatch : dispatches) {
     RuntimeContext ctx = ctx_;
 
-    TI_ASSERT(dispatch.compiled_kernel);
+    TI_ASSERT(dispatch.ti_kernel || dispatch.compiled_kernel);
 
     // Populate args metadata into RuntimeContext
     const auto &symbolic_args_ = dispatch.symbolic_args;
@@ -71,12 +72,22 @@ void CompiledGraph::run(
         ctx.set_arg_texture(i, tex->get_device_allocation_ptr_as_int());
       } else if (ival.tag == aot::ArgKind::kRWTexture) {
         Texture *tex = reinterpret_cast<Texture *>(ival.val);
-        ctx.set_arg_rw_texture(i, tex->get_device_allocation_ptr_as_int());
+        ctx.set_arg_rw_texture(i, tex->get_device_allocation_ptr_as_int(),
+                               tex->get_size());
       } else {
         TI_ERROR("Error in compiled graph: unknown tag {}", ival.tag);
       }
     }
-    dispatch.compiled_kernel->launch(&ctx);
+
+    if (dispatch.compiled_kernel) {
+      // Run cgraph loaded from AOT module
+      dispatch.compiled_kernel->launch(&ctx);
+    } else {
+      // JIT & Run
+      TI_ASSERT(dispatch.ti_kernel);
+      lang::Kernel::LaunchContextBuilder launch_ctx(dispatch.ti_kernel, &ctx);
+      dispatch.ti_kernel->operator()(launch_ctx);
+    }
   }
 }
 }  // namespace aot

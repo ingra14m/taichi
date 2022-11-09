@@ -14,7 +14,7 @@
 namespace taichi::lang {
 
 static std::vector<std::uint8_t> get_offline_cache_key_of_compile_config(
-    CompileConfig *config) {
+    const CompileConfig *config) {
   TI_ASSERT(config);
   BinaryOutputSerializer serializer;
   serializer.initialize();
@@ -64,6 +64,7 @@ static std::vector<std::uint8_t> get_offline_cache_key_of_compile_config(
   serializer(config->demote_no_access_mesh_fors);
   serializer(config->experimental_auto_mesh_local);
   serializer(config->auto_mesh_local_default_occupacy);
+  serializer(config->dynamic_index);
   serializer(config->real_matrix);
   serializer(config->real_matrix_scalarize);
   serializer.finalize();
@@ -148,7 +149,7 @@ std::string get_hashed_offline_cache_key_of_snode(SNode *snode) {
   return picosha2::get_hash_hex_string(hasher);
 }
 
-std::string get_hashed_offline_cache_key(CompileConfig *config,
+std::string get_hashed_offline_cache_key(const CompileConfig *config,
                                          Kernel *kernel) {
   std::string kernel_ast_string;
   if (kernel) {

@@ -20,15 +20,16 @@ atexit.register(lambda: rmdir(OFFLINE_CACHE_TEMP_DIR))
 
 supported_llvm_archs = {ti.cpu, ti.cuda}
 supported_gfx_archs = {ti.opengl, ti.vulkan}
-supported_archs_offline_cache = supported_llvm_archs | supported_gfx_archs
-supported_archs_offline_cache = [
-    v for v in supported_archs_offline_cache
-    if v in test_utils.expected_archs()
-]
+supported_metal_arch = {ti.metal}
+supported_archs_offline_cache = supported_llvm_archs | supported_gfx_archs | supported_metal_arch
+supported_archs_offline_cache = {
+    v
+    for v in supported_archs_offline_cache if v in test_utils.expected_archs()
+}
 
 
 def is_offline_cache_file(filename):
-    suffixes = ('.ll', '.bc', '.spv')
+    suffixes = ('.ll', '.bc', '.spv', '.metal')
     return filename.endswith(suffixes)
 
 
@@ -51,12 +52,16 @@ def expected_num_cache_files(arch, num_offloads: List[int] = None) -> int:
         result += len(num_offloads)
     elif arch in supported_gfx_archs:
         result += sum(num_offloads)
+    elif arch in supported_metal_arch:
+        result += len(num_offloads)
     # metadata files
     if arch in supported_llvm_archs:
         result += 2  # metadata.{json, tcb}
     elif arch in supported_gfx_archs:
         # metadata.{json, tcb}, graphs.tcb, offline_cache_metadata.tcb
         result += 4
+    elif arch in supported_metal_arch:
+        result += 1  # metadata.tcb
     return result
 
 
@@ -69,6 +74,8 @@ def backend_specified_cache_path(arch):
         return join(tmp_offline_cache_file_path(), 'llvm')
     elif arch in supported_gfx_archs:
         return join(tmp_offline_cache_file_path(), 'gfx')
+    elif arch in supported_metal_arch:
+        return join(tmp_offline_cache_file_path(), 'metal')
     assert False
 
 
@@ -504,9 +511,8 @@ def test_offline_cache_cleaning(curr_arch, factor, policy):
         only_init(max_size)
         for kernel, args, get_res, num_offloads in simple_kernels_to_test:
             assert kernel(*args) == test_utils.approx(get_res(*args))
-            if curr_arch in [ti.vulkan]:
-                sleep(
-                    1)  # make sure the kernels are not used in the same second
+            # The timestamp used by cache cleaning is at second precision, so we should make sure the kernels are not used in the same second
+            sleep(1)
 
     kernel_count = len(simple_kernels_to_test)
     count_of_cache_file = cache_files_cnt(curr_arch)
@@ -541,8 +547,8 @@ def test_offline_cache_cleaning(curr_arch, factor, policy):
 
 
 # FIXME: Change to `supported_archs_offline_cache` after fixing bugs of real-function on gpu
-@pytest.mark.parametrize(
-    'curr_arch', [ti.cpu] if ti.cpu in test_utils.expected_archs() else [])
+@pytest.mark.parametrize('curr_arch',
+                         {ti.cpu, ti.cuda} & supported_archs_offline_cache)
 @_test_offline_cache_dec
 def test_offline_cache_for_kernels_calling_real_func(curr_arch):
     count_of_cache_file = cache_files_cnt(curr_arch)

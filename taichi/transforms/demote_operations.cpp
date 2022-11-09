@@ -13,7 +13,7 @@ class DemoteOperations : public BasicStmtVisitor {
   using BasicStmtVisitor::visit;
   DelayedIRModifier modifier;
 
-  DemoteOperations() : BasicStmtVisitor() {
+  DemoteOperations() {
   }
 
   std::unique_ptr<Stmt> demote_ifloordiv(BinaryOpStmt *stmt,
@@ -59,25 +59,6 @@ class DemoteOperations : public BasicStmtVisitor {
     auto floor = Stmt::make<UnaryOpStmt>(UnaryOpType::floor, div.get());
     modifier.insert_before(stmt, std::move(div));
     return floor;
-  }
-
-  void visit(BitExtractStmt *stmt) override {
-    // @ti.func
-    // def bit_extract(input, begin, end):
-    //   return (input >> begin) & ((1 << (end - begin)) - 1)
-    VecStatement statements;
-    auto begin = statements.push_back<ConstStmt>(
-        TypedConstant(stmt->input->ret_type, stmt->bit_begin));
-    auto input_sar_begin = statements.push_back<BinaryOpStmt>(
-        BinaryOpType::bit_sar, stmt->input, begin);
-    auto mask = statements.push_back<ConstStmt>(TypedConstant(
-        stmt->input->ret_type, (1LL << (stmt->bit_end - stmt->bit_begin)) - 1));
-    auto ret = statements.push_back<BinaryOpStmt>(BinaryOpType::bit_and,
-                                                  input_sar_begin, mask);
-    ret->ret_type = stmt->ret_type;
-    stmt->replace_usages_with(ret);
-    modifier.insert_before(stmt, std::move(statements));
-    modifier.erase(stmt);
   }
 
   void visit(BinaryOpStmt *stmt) override {
@@ -252,7 +233,8 @@ class DemoteOperations : public BasicStmtVisitor {
       }
       auto final_result = builder.create_local_load(result);
       stmt->replace_usages_with(final_result);
-      modifier.insert_before(stmt, std::move(builder.extract_ir()->statements));
+      modifier.insert_before(
+          stmt, VecStatement(std::move(builder.extract_ir()->statements)));
       modifier.erase(stmt);
     }
   }

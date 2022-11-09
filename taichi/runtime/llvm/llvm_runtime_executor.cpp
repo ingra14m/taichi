@@ -120,7 +120,7 @@ LlvmRuntimeExecutor::LlvmRuntimeExecutor(CompileConfig &config,
     llvm_context_device_ =
         std::make_unique<TaichiLLVMContext>(config_, Arch::dx12);
     // FIXME: add dx12 JIT.
-    // llvm_context_device_->init_runtime_jit_module();
+    llvm_context_device_->init_runtime_jit_module();
   }
 #endif
 
@@ -609,6 +609,10 @@ void LlvmRuntimeExecutor::materialize_runtime(MemoryPool *memory_pool,
     runtime_jit->call<void *, void *>(
         "LLVMRuntime_set_profiler_stop", llvm_runtime_,
         (void *)&KernelProfilerBase::profiler_stop);
+  }
+  if (arch_is_cpu(config_->arch) || config_->arch == Arch::cuda) {
+    runtime_jit->call<void *>("runtime_initialize_runtime_context_buffer",
+                              llvm_runtime_);
   }
 }
 

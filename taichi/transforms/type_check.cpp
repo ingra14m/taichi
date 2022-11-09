@@ -125,6 +125,9 @@ class TypeCheck : public IRVisitor {
   void visit(SNodeOpStmt *stmt) override {
     if (stmt->op_type == SNodeOpType::get_addr) {
       stmt->ret_type = PrimitiveType::u64;
+    } else if (stmt->op_type == SNodeOpType::allocate) {
+      stmt->ret_type = PrimitiveType::gen;
+      stmt->ret_type.set_is_pointer(true);
     } else {
       stmt->ret_type = PrimitiveType::i32;
     }
@@ -145,16 +148,18 @@ class TypeCheck : public IRVisitor {
     } else
       TI_WARN("[{}] Type inference failed: snode is nullptr.\n{}", stmt->name(),
               stmt->tb);
-    if (stmt->snode->parent->num_active_indices != 0 &&
-        stmt->snode->parent->num_active_indices != stmt->indices.size()) {
-      TI_ERROR("[{}] {} has {} indices. Indexed with {}.", stmt->name(),
-               stmt->snode->parent->node_type_name,
-               stmt->snode->parent->num_active_indices, stmt->indices.size());
-    }
+    auto check_indices = [&](SNode *snode) {
+      if (snode->num_active_indices != stmt->indices.size()) {
+        TI_ERROR("[{}] {} has {} indices. Indexed with {}.", stmt->name(),
+                 snode->node_type_name, snode->num_active_indices,
+                 stmt->indices.size());
+      }
+    };
+    check_indices(stmt->is_cell_access ? stmt->snode : stmt->snode->parent);
     for (int i = 0; i < stmt->indices.size(); i++) {
-      if (!is_integral(stmt->indices[i]->ret_type)) {
+      if (!stmt->indices[i]->ret_type->is_primitive(PrimitiveTypeID::i32)) {
         TI_WARN(
-            "[{}] Field index {} not integral, casting into int32 "
+            "[{}] Field index {} not int32, casting into int32 "
             "implicitly\n{}",
             stmt->name(), i, stmt->tb);
         stmt->indices[i] =
@@ -420,8 +425,25 @@ class TypeCheck : public IRVisitor {
   }
 
   void visit(ExternalPtrStmt *stmt) override {
+    /* ExternalPtrStmt may have two different semantics:
+       1. outer indexing to an argloaded external tensor
+       2. outer indexing + inner indexing to get the innermost primitive
+       element of an external tensor
+       We rely on "external_dims" and "indices" to distinguish these two cases.
+       Case #1: external_dims == indices.size(), return TensorType
+       Case #2: external_dims < indices.size(), return PrimitiveType
+    */
+    TI_ASSERT(stmt->base_ptr->is<ArgLoadStmt>());
+    auto arg_load_stmt = stmt->base_ptr->cast<ArgLoadStmt>();
+
+    int external_dims = arg_load_stmt->field_dims_;
+    if (external_dims == stmt->indices.size() || external_dims == -1) {
+      stmt->ret_type = arg_load_stmt->ret_type;
+    } else {
+      stmt->ret_type = arg_load_stmt->ret_type.ptr_removed().get_element_type();
+    }
+
     stmt->ret_type.set_is_pointer(true);
-    stmt->ret_type = stmt->base_ptr->ret_type;
     for (int i = 0; i < stmt->indices.size(); i++) {
       TI_ASSERT(is_integral(stmt->indices[i]->ret_type));
       if (stmt->indices[i]->ret_type != PrimitiveType::i32) {

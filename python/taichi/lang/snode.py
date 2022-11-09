@@ -1,7 +1,7 @@
 import numbers
 
 from taichi._lib import core as _ti_core
-from taichi.lang import expr, impl, matrix
+from taichi.lang import expr, impl, matrix, struct
 from taichi.lang.field import BitpackedFields, Field
 
 
@@ -30,7 +30,7 @@ class SNode:
         Returns:
             The added :class:`~taichi.lang.SNode` instance.
         """
-        if isinstance(dimensions, int):
+        if isinstance(dimensions, numbers.Number):
             dimensions = [dimensions] * len(axes)
         return SNode(
             self.ptr.dense(axes, dimensions,
@@ -46,7 +46,7 @@ class SNode:
         Returns:
             The added :class:`~taichi.lang.SNode` instance.
         """
-        if isinstance(dimensions, int):
+        if isinstance(dimensions, numbers.Number):
             dimensions = [dimensions] * len(axes)
         return SNode(
             self.ptr.pointer(axes, dimensions,
@@ -90,7 +90,7 @@ class SNode:
         Returns:
             The added :class:`~taichi.lang.SNode` instance.
         """
-        if isinstance(dimensions, int):
+        if isinstance(dimensions, numbers.Number):
             dimensions = [dimensions] * len(axes)
         return SNode(
             self.ptr.bitmasked(axes, dimensions,
@@ -107,7 +107,7 @@ class SNode:
         Returns:
             The added :class:`~taichi.lang.SNode` instance.
         """
-        if isinstance(dimensions, int):
+        if isinstance(dimensions, numbers.Number):
             dimensions = [dimensions] * len(axes)
         return SNode(
             self.ptr.quant_array(axes, dimensions, max_num_bits,
@@ -368,12 +368,21 @@ def append(node, indices, val):
     Args:
         node (:class:`~taichi.SNode`): Input SNode.
         indices (Union[int, :class:`~taichi.Vector`]): the indices to visit.
-        val (:mod:`~taichi.types`): the data to be appended.
+        val (:mod:`~taichi.types.primitive_types`): the scalar data to be appended, only i32 value is support for now.
     """
-    a = impl.expr_init(
-        _ti_core.expr_snode_append(node._snode.ptr,
-                                   expr.make_expr_group(indices),
-                                   expr.Expr(val).ptr))
+    if isinstance(val, matrix.Matrix):
+        raise ValueError(
+            "ti.append only supports appending a scalar value or a struct")
+    ptrs = []
+    if isinstance(val, struct.Struct):
+        for item in val._members:
+            ptrs.append(expr.Expr(item).ptr)
+    else:
+        ptrs = [expr.Expr(val).ptr]
+    append_expr = expr.Expr(_ti_core.expr_snode_append(
+        node._snode.ptr, expr.make_expr_group(indices), ptrs),
+                            tb=impl.get_runtime().get_current_src_info())
+    a = impl.expr_init(append_expr)
     return a
 
 

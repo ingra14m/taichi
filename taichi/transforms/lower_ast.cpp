@@ -233,12 +233,24 @@ class LowerAST : public IRVisitor {
       new_for->mem_access_opt = stmt->mem_access_opt;
       fctx.push_back(std::move(new_for));
     } else if (stmt->external_tensor) {
-      auto tensor = stmt->external_tensor.cast<ExternalTensorExpression>();
+      int arg_id = -1;
       std::vector<Stmt *> shape;
-      for (int i = 0; i < tensor->dim - abs(tensor->element_dim); i++) {
-        shape.push_back(fctx.push_back<ExternalTensorShapeAlongAxisStmt>(
-            i, tensor->arg_id));
+      if (stmt->external_tensor.is<ExternalTensorExpression>()) {
+        auto tensor = stmt->external_tensor.cast<ExternalTensorExpression>();
+        arg_id = tensor->arg_id;
+        for (int i = 0; i < tensor->dim - abs(tensor->element_dim); i++) {
+          shape.push_back(
+              fctx.push_back<ExternalTensorShapeAlongAxisStmt>(i, arg_id));
+        }
+      } else if (stmt->external_tensor.is<TexturePtrExpression>()) {
+        auto rw_texture = stmt->external_tensor.cast<TexturePtrExpression>();
+        arg_id = rw_texture->arg_id;
+        for (size_t i = 0; i < rw_texture->num_dims; ++i) {
+          shape.emplace_back(
+              fctx.push_back<ExternalTensorShapeAlongAxisStmt>(i, arg_id));
+        }
       }
+
       Stmt *begin = fctx.push_back<ConstStmt>(TypedConstant(0));
       Stmt *end = fctx.push_back<ConstStmt>(TypedConstant(1));
       for (int i = 0; i < (int)shape.size(); i++) {
@@ -248,7 +260,7 @@ class LowerAST : public IRVisitor {
       auto &&new_for = std::make_unique<RangeForStmt>(
           begin, end, std::move(stmt->body), stmt->is_bit_vectorized,
           stmt->num_cpu_threads, stmt->block_dim, stmt->strictly_serialized,
-          /*range_hint=*/fmt::format("arg {}", tensor->arg_id));
+          /*range_hint=*/fmt::format("arg {}", arg_id));
       VecStatement new_statements;
       Stmt *loop_index =
           new_statements.push_back<LoopIndexStmt>(new_for.get(), 0);
@@ -433,7 +445,8 @@ class LowerAST : public IRVisitor {
                stmt->snode->type == SNodeType::dense ||
                stmt->snode->type == SNodeType::bitmasked) {
       TI_ASSERT(SNodeOpStmt::activation_related(stmt->op_type));
-      auto ptr = fctx.push_back<GlobalPtrStmt>(stmt->snode, indices_stmt);
+      auto ptr =
+          fctx.push_back<GlobalPtrStmt>(stmt->snode, indices_stmt, true, true);
       fctx.push_back<SNodeOpStmt>(stmt->op_type, stmt->snode, ptr, val_stmt);
     } else {
       TI_ERROR("The {} operation is not supported on {} SNode",
@@ -476,7 +489,7 @@ class LowerAST : public IRVisitor {
     TI_ASSERT((int)(stmt->so_func != nullptr) +
                   (int)(!stmt->asm_source.empty()) +
                   (int)(!stmt->bc_filename.empty()) ==
-              1)
+              1);
     std::vector<Stmt *> arg_statements, output_statements;
     if (stmt->so_func != nullptr || !stmt->asm_source.empty()) {
       for (auto &s : stmt->args) {

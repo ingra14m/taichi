@@ -10,7 +10,7 @@ from taichi.lang import runtime_ops
 from taichi.lang._ndarray import Ndarray, NdarrayHostAccess
 from taichi.lang.common_ops import TaichiOperations
 from taichi.lang.enums import Layout
-from taichi.lang.exception import (TaichiCompilationError, TaichiSyntaxError,
+from taichi.lang.exception import (TaichiRuntimeError, TaichiSyntaxError,
                                    TaichiTypeError)
 from taichi.lang.field import Field, ScalarField, SNodeHostAccess
 from taichi.lang.swizzle_generator import SwizzleGenerator
@@ -25,6 +25,7 @@ def _gen_swizzles(cls):
     swizzle_gen = SwizzleGenerator()
     # https://www.khronos.org/opengl/wiki/Data_Type_(GLSL)#Swizzling
     KEYGROUP_SET = ['xyzw', 'rgba', 'stpq']
+    cls._swizzle_to_keygroup = {}
 
     def make_valid_attribs_checker(key_group):
         def check(instance, pattern):
@@ -59,6 +60,7 @@ def _gen_swizzles(cls):
 
             prop = gen_property(attr, index, key_group)
             setattr(cls, attr, prop)
+            cls._swizzle_to_keygroup[attr] = key_group
 
     for key_group in KEYGROUP_SET:
         sw_patterns = swizzle_gen.generate(key_group, required_length=4)
@@ -78,23 +80,22 @@ def _gen_swizzles(cls):
                             instance._impl._get_entry(key_group.index(ch)))
                     return Vector(res, is_ref=True)
 
+                @python_scope
                 def prop_setter(instance, value):
                     if len(pattern) != len(value):
-                        raise TaichiCompilationError(
+                        raise TaichiRuntimeError(
                             f'value len does not match the swizzle pattern={prop_key}'
                         )
                     checker(instance, pattern)
                     for ch, val in zip(pattern, value):
-                        if in_python_scope():
-                            instance[key_group.index(ch)] = val
-                        else:
-                            instance(key_group.index(ch))._assign(val)
+                        instance[key_group.index(ch)] = val
 
                 prop = property(prop_getter, prop_setter)
                 return prop_key, prop
 
             prop_key, prop = gen_property(pat, key_group)
             setattr(cls, prop_key, prop)
+            cls._swizzle_to_keygroup[prop_key] = key_group
     return cls
 
 
@@ -243,16 +244,16 @@ class _TiScopeMatrixImpl(_MatrixBaseImpl):
         self.dynamic_index_stride = dynamic_index_stride
 
     @taichi_scope
-    def _subscript(self, is_global_mat, *indices, get_ref=False):
+    def _subscript(self, is_global_mat, *indices):
         assert len(indices) in [1, 2]
         i = indices[0]
         j = 0 if len(indices) == 1 else indices[1]
         has_slice = False
         if isinstance(i, slice):
-            i = self._calc_slice(i, 0)
+            i = impl._calc_slice(i, self.n)
             has_slice = True
         if isinstance(j, slice):
-            j = self._calc_slice(j, 1)
+            j = impl._calc_slice(j, self.m)
             has_slice = True
 
         if has_slice:
@@ -262,10 +263,10 @@ class _TiScopeMatrixImpl(_MatrixBaseImpl):
                 j = [j]
             if len(indices) == 1:
                 return Vector([self._subscript(is_global_mat, a) for a in i],
-                              is_ref=get_ref)
+                              is_ref=True)
             return Matrix([[self._subscript(is_global_mat, a, b) for b in j]
                            for a in i],
-                          is_ref=get_ref)
+                          is_ref=True)
 
         if self.any_array_access:
             return self.any_array_access.subscript(i, j)
@@ -279,21 +280,6 @@ class _TiScopeMatrixImpl(_MatrixBaseImpl):
                                          (self.n, self.m),
                                          self.dynamic_index_stride)
         return self._get_entry(i, j)
-
-    def _calc_slice(self, index, dim):
-        start, stop, step = index.start or 0, index.stop or (
-            self.n if dim == 0 else self.m), index.step or 1
-
-        def helper(x):
-            #  TODO(mzmzm): support variable in slice
-            if isinstance(x, expr.Expr):
-                raise TaichiCompilationError(
-                    "Taichi does not support variables in slice now, please use constant instead of it."
-                )
-            return x
-
-        start, stop, step = helper(start), helper(stop), helper(step)
-        return [_ for _ in range(start, stop, step)]
 
 
 class _MatrixEntriesInitializer:
@@ -397,8 +383,6 @@ class Matrix(TaichiOperations):
     Args:
         arr (Union[list, tuple, np.ndarray]): the initial values of a matrix.
         dt (:mod:`~taichi.types.primitive_types`): the element data type.
-        suppress_warning (bool): whether raise warning or not when the matrix contains more \
-            than 32 elements.
         ndim (int optional): the number of dimensions of the matrix; forced reshape if given.
 
     Example::
@@ -430,12 +414,7 @@ class Matrix(TaichiOperations):
     _is_taichi_class = True
     __array_priority__ = 1000
 
-    def __init__(self,
-                 arr,
-                 dt=None,
-                 suppress_warning=False,
-                 is_ref=False,
-                 ndim=None):
+    def __init__(self, arr, dt=None, is_ref=False, ndim=None):
         local_tensor_proxy = None
 
         if not isinstance(arr, (list, tuple, np.ndarray)):
@@ -448,9 +427,14 @@ class Matrix(TaichiOperations):
         elif isinstance(arr[0], Matrix):
             raise Exception('cols/rows required when using list of vectors')
         else:
-            is_matrix = isinstance(arr[0], Iterable) and not is_vector(self)
+            if ndim is not None:
+                self.ndim = ndim
+                is_matrix = ndim == 2
+            else:
+                is_matrix = isinstance(arr[0],
+                                       Iterable) and not is_vector(self)
+                self.ndim = 2 if is_matrix else 1
             initializer = _make_entries_initializer(is_matrix)
-            self.ndim = 2 if is_matrix else 1
             if not is_matrix and isinstance(arr[0], Iterable):
                 flattened = []
                 for row in arr:
@@ -482,7 +466,7 @@ class Matrix(TaichiOperations):
             assert ndim in (0, 1, 2)
             self.ndim = ndim
 
-        if self.n * self.m > 32 and not suppress_warning:
+        if self.n * self.m > 32:
             warning(
                 f'Taichi matrices/vectors with {self.n}x{self.m} > 32 entries are not suggested.'
                 ' Matrices/vectors will be automatically unrolled at compile-time for performance.'
@@ -499,6 +483,19 @@ class Matrix(TaichiOperations):
         else:
             self._impl = _TiScopeMatrixImpl(m, n, entries, local_tensor_proxy,
                                             None)
+
+    def get_shape(self):
+        if self.ndim == 1:
+            return (self.n, )
+        return (self.n, self.m)
+
+    def element_type(self):
+        if self._impl.entries:
+            if in_python_scope():
+                return type(self._impl.entries[0])
+            return getattr(self._impl.entries[0], 'element_type',
+                           lambda: None)()
+        return None
 
     def _element_wise_binary(self, foo, other):
         other = self._broadcast_copy(other)
@@ -655,7 +652,7 @@ class Matrix(TaichiOperations):
         return self._impl.dynamic_index_stride
 
     @taichi_scope
-    def _subscript(self, *indices, get_ref=False):
+    def _subscript(self, *indices):
         assert len(
             indices
         ) == self.ndim, f"Expected {self.ndim} indices, got {len(indices)}"
@@ -665,7 +662,7 @@ class Matrix(TaichiOperations):
             # 2. Taichi kernel directlly uses a matrix (global variable) created in the Python scope.
             return self._impl.subscript_scope_ignored(indices)
         is_global_mat = isinstance(self, _MatrixFieldElement)
-        return self._impl._subscript(is_global_mat, *indices, get_ref=get_ref)
+        return self._impl._subscript(is_global_mat, *indices)
 
     def to_list(self):
         """Return this matrix as a 1D `list`.
@@ -718,11 +715,9 @@ class Matrix(TaichiOperations):
             >>> m.trace()
             5
         """
-        assert self.n == self.m
-        _sum = self(0, 0)
-        for i in range(1, self.n):
-            _sum = _sum + self(i, i)
-        return _sum
+        # pylint: disable-msg=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.trace(self)
 
     @taichi_scope
     def inverse(self):
@@ -796,11 +791,9 @@ class Matrix(TaichiOperations):
             >>> a.normalized()
             [0.6, 0.8]
         """
-        impl.static(
-            impl.static_assert(self.m == 1,
-                               "normalized() only works on vector"))
-        invlen = 1 / (self.norm() + eps)
-        return invlen * self
+        # pylint: disable-msg=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.normalized(self, eps)
 
     def transpose(self):
         """Returns the transpose of a matrix.
@@ -814,8 +807,9 @@ class Matrix(TaichiOperations):
             >>> A.transpose()
             [[0, 2], [1, 3]]
         """
-        from taichi._funcs import _matrix_transpose  # pylint: disable=C0415
-        return _matrix_transpose(self)
+        # pylint: disable=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.transpose(self)
 
     @taichi_scope
     def determinant(a):
@@ -830,33 +824,9 @@ class Matrix(TaichiOperations):
         Raises:
             Exception: Determinants of matrices with sizes >= 5 are not supported.
         """
-        if a.n == 1 and a.m == 1:
-            return a(0, 0)
-        if a.n == 2 and a.m == 2:
-            return a(0, 0) * a(1, 1) - a(0, 1) * a(1, 0)
-        if a.n == 3 and a.m == 3:
-            return a(0, 0) * (a(1, 1) * a(2, 2) - a(2, 1) * a(1, 2)) - a(
-                1, 0) * (a(0, 1) * a(2, 2) - a(2, 1) * a(0, 2)) + a(
-                    2, 0) * (a(0, 1) * a(1, 2) - a(1, 1) * a(0, 2))
-        if a.n == 4 and a.m == 4:
-            n = 4
-
-            def E(x, y):
-                return a(x % n, y % n)
-
-            det = impl.expr_init(0.0)
-            for i in range(4):
-                det = det + (-1.0)**i * (
-                    a(i, 0) *
-                    (E(i + 1, 1) *
-                     (E(i + 2, 2) * E(i + 3, 3) - E(i + 3, 2) * E(i + 2, 3)) -
-                     E(i + 2, 1) *
-                     (E(i + 1, 2) * E(i + 3, 3) - E(i + 3, 2) * E(i + 1, 3)) +
-                     E(i + 3, 1) *
-                     (E(i + 1, 2) * E(i + 2, 3) - E(i + 2, 2) * E(i + 1, 3))))
-            return det
-        raise Exception(
-            "Determinants of matrices with sizes >= 5 are not supported")
+        # pylint: disable=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.determinant(a)
 
     @staticmethod
     def diag(dim, val):
@@ -877,9 +847,9 @@ class Matrix(TaichiOperations):
              [0, 1, 0],
              [0, 0, 1]]
         """
-        # TODO: need a more systematic way to create a "0" with the right type
-        return Matrix([[val if i == j else 0 * val for j in range(dim)]
-                       for i in range(dim)])
+        # pylint: disable=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.diag(dim, val)
 
     def sum(self):
         """Return the sum of all elements.
@@ -890,10 +860,9 @@ class Matrix(TaichiOperations):
             >>> m.sum()
             10
         """
-        ret = self.entries[0]
-        for i in range(1, len(self.entries)):
-            ret = ret + self.entries[i]
-        return ret
+        # pylint: disable=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.sum(self)
 
     def norm(self, eps=0):
         """Returns the square root of the sum of the absolute squares
@@ -911,7 +880,9 @@ class Matrix(TaichiOperations):
         Returns:
             The square root of the sum of the absolute squares of its elements.
         """
-        return ops_mod.sqrt(self.norm_sqr() + eps)
+        # pylint: disable=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.norm(self, eps=eps)
 
     def norm_inv(self, eps=0):
         """The inverse of the matrix :func:`~taichi.lang.matrix.Matrix.norm`.
@@ -922,19 +893,27 @@ class Matrix(TaichiOperations):
         Returns:
             The inverse of the matrix/vector `norm`.
         """
-        return ops_mod.rsqrt(self.norm_sqr() + eps)
+        # pylint: disable=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.norm_inv(self, eps=eps)
 
     def norm_sqr(self):
         """Returns the sum of the absolute squares of its elements."""
-        return (self * self).sum()
+        # pylint: disable=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.norm_sqr(self)
 
     def max(self):
         """Returns the maximum element value."""
-        return ops_mod.max(*self.entries)
+        # pylint: disable=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.max(self)
 
     def min(self):
         """Returns the minimum element value."""
-        return ops_mod.min(*self.entries)
+        # pylint: disable=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.min(self)
 
     def any(self):
         """Test whether any element not equal zero.
@@ -948,10 +927,9 @@ class Matrix(TaichiOperations):
             >>> v.any()
             True
         """
-        ret = False
-        for entry in self.entries:
-            ret = ret | ops_mod.cmp_ne(entry, 0)
-        return ret & True
+        # pylint: disable=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.any(self)
 
     def all(self):
         """Test whether all element not equal zero.
@@ -965,10 +943,9 @@ class Matrix(TaichiOperations):
             >>> v.all()
             False
         """
-        ret = True
-        for entry in self.entries:
-            ret = ret & ops_mod.cmp_ne(entry, 0)
-        return ret
+        # pylint: disable=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.all(self)
 
     @taichi_scope
     def fill(self, val):
@@ -985,10 +962,9 @@ class Matrix(TaichiOperations):
             >>> A
             [-1, -1, -1, -1]
         """
-        def assign_renamed(x, y):
-            return ops_mod.assign(x, y)
-
-        return self._element_wise_writeback_binary(assign_renamed, val)
+        # pylint: disable=C0415
+        from taichi.lang import matrix_ops
+        return matrix_ops.fill(self, val)
 
     @python_scope
     def to_numpy(self, keep_dims=False):
@@ -1400,19 +1376,8 @@ class Matrix(TaichiOperations):
             >>> v1.dot(v2)
             26
         """
-        impl.static(
-            impl.static_assert(self.m == 1, "lhs for dot is not a vector"))
-        impl.static(
-            impl.static_assert(other.m == 1, "rhs for dot is not a vector"))
-        return (self * other).sum()
-
-    def _cross3d(self, other):
-        from taichi._funcs import _matrix_cross3d  # pylint: disable=C0415
-        return _matrix_cross3d(self, other)
-
-    def _cross2d(self, other):
-        from taichi._funcs import _matrix_cross2d  # pylint: disable=C0415
-        return _matrix_cross2d(self, other)
+        from taichi.lang import matrix_ops  # pylint: disable=C0415
+        return matrix_ops.dot(self, other)
 
     def cross(self, other):
         """Performs the cross product with the input vector (1-D Matrix).
@@ -1431,14 +1396,8 @@ class Matrix(TaichiOperations):
         Returns:
             :class:`~taichi.Matrix`: The cross product of the two Vectors.
         """
-        if self.n == 3 and self.m == 1 and other.n == 3 and other.m == 1:
-            return self._cross3d(other)
-
-        if self.n == 2 and self.m == 1 and other.n == 2 and other.m == 1:
-            return self._cross2d(other)
-
-        raise ValueError(
-            "Cross product is only supported between pairs of 2D/3D vectors")
+        from taichi.lang import matrix_ops  # pylint: disable=C0415
+        return matrix_ops.cross(self, other)
 
     def outer_product(self, other):
         """Performs the outer product with the input Vector (1-D Matrix).
@@ -1453,9 +1412,8 @@ class Matrix(TaichiOperations):
         Returns:
             :class:`~taichi.Matrix`: The outer product of the two Vectors.
         """
-        from taichi._funcs import \
-            _vector_outer_product  # pylint: disable=C0415
-        return _vector_outer_product(self, other)
+        from taichi.lang import matrix_ops  # pylint: disable=C0415
+        return matrix_ops.outer_product(self, other)
 
 
 class Vector(Matrix):
@@ -1479,6 +1437,9 @@ class Vector(Matrix):
             [4 6]
         """
         super().__init__(arr, dt=dt, **kwargs)
+
+    def get_shape(self):
+        return (self.n, )
 
     @classmethod
     def field(cls, n, dtype, *args, **kwargs):
@@ -1630,34 +1591,24 @@ class MatrixField(Field):
         """Fills this matrix field with specified values.
 
         Args:
-            val (Union[Number, List, Tuple, Matrix]): Values to fill,
+            val (Union[Number, Expr, List, Tuple, Matrix]): Values to fill,
                 should have consistent dimension consistent with `self`.
         """
-        if isinstance(val, numbers.Number):
-            val = tuple(
-                [tuple([val for _ in range(self.m)]) for _ in range(self.n)])
-        elif isinstance(val,
-                        (list, tuple)) and isinstance(val[0], numbers.Number):
-            assert self.m == 1
-            val = tuple(val)
-        elif is_vector(val):
-            val = tuple([(val(i), ) for i in range(self.n * self.m)])
+        if isinstance(val, numbers.Number) or (isinstance(val, expr.Expr)
+                                               and not val.is_tensor()):
+            val = list(list(val for _ in range(self.m)) for _ in range(self.n))
         elif isinstance(val, Matrix):
-            val_tuple = []
-            for i in range(val.n):
-                row = []
-                for j in range(val.m):
-                    row.append(val(i, j))
-                row = tuple(row)
-                val_tuple.append(row)
-            val = tuple(val_tuple)
+            val = val.to_list()
+        else:
+            assert isinstance(val, (list, tuple))
+        val = tuple(tuple(x) if isinstance(x, list) else x for x in val)
         assert len(val) == self.n
         if self.ndim != 1:
             assert len(val[0]) == self.m
-
         if in_python_scope():
-            from taichi._kernels import fill_matrix  # pylint: disable=C0415
-            fill_matrix(self, val)
+            from taichi._kernels import \
+                field_fill_python_scope  # pylint: disable=C0415
+            field_fill_python_scope(self, val)
         else:
             from taichi._funcs import \
                 field_fill_taichi_scope  # pylint: disable=C0415
@@ -1735,15 +1686,7 @@ class MatrixField(Field):
         return arr
 
     @python_scope
-    def from_numpy(self, arr):
-        """Copies an `numpy.ndarray` into this field.
-
-        Example::
-
-            >>> m = ti.Matrix.field(2, 2, ti.f32, shape=(3, 3))
-            >>> arr = numpp.ones((3, 3, 2, 2))
-            >>> m.from_numpy(arr)
-        """
+    def _from_external_arr(self, arr):
         if len(arr.shape) == len(self.shape) + 1:
             as_vector = True
             assert self.m == 1, "This is not a vector field"
@@ -1755,6 +1698,21 @@ class MatrixField(Field):
         from taichi._kernels import ext_arr_to_matrix  # pylint: disable=C0415
         ext_arr_to_matrix(arr, self, as_vector)
         runtime_ops.sync()
+
+    @python_scope
+    def from_numpy(self, arr):
+        """Copies an `numpy.ndarray` into this field.
+
+        Example::
+
+            >>> m = ti.Matrix.field(2, 2, ti.f32, shape=(3, 3))
+            >>> arr = numpy.ones((3, 3, 2, 2))
+            >>> m.from_numpy(arr)
+        """
+
+        if not arr.flags.c_contiguous:
+            arr = np.ascontiguousarray(arr)
+        self._from_external_arr(arr)
 
     @python_scope
     def __setitem__(self, key, value):

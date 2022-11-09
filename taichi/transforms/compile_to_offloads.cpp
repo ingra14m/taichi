@@ -104,11 +104,13 @@ void compile_to_offloads(IRNode *ir,
     // access rule
     // This check should be performed in the forward kernel i.e., autodiff_mode
     // == AutodiffMode::kCheckAutodiffValid
+    irpass::demote_atomics(ir, config);
     irpass::differentiation_validation_check(ir, config, kernel->get_name());
     irpass::analysis::verify(ir);
   }
 
-  if (autodiff_mode != AutodiffMode::kNone) {
+  if (autodiff_mode == AutodiffMode::kReverse ||
+      autodiff_mode == AutodiffMode::kForward) {
     // Remove local atomics here so that we don't have to handle their gradients
     irpass::demote_atomics(ir, config);
 
