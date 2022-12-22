@@ -6,6 +6,8 @@ cmake_minimum_required(VERSION 3.17)
 
 project(taichi)
 
+include("cmake/utils.cmake")
+
 if (NOT DEFINED TI_VERSION_MAJOR)
     message(WARNING "It seems that you are running cmake manually, which may cause issues. Please use setup.py to build taichi from source, see https://docs.taichi-lang.org/docs/dev_install for more details.")
     set(TI_VERSION_MAJOR 0)
@@ -55,13 +57,32 @@ if(CCACHE_PROGRAM)
     set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
 endif()
 
+# This compiles all the libraries with -fPIC, which is critical to link a static
+# library into a shared lib.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+
 option(USE_LLD "Use lld (from llvm) linker" OFF)
 option(USE_MOLD "Use mold (A Modern Linker)" OFF)
+option(TI_WITH_BACKTRACE "Use backward-cpp to print out C++ stack trace upon failure" OFF)
+
+if(LINUX OR APPLE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
+endif()
 
 if (USE_LLD)
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=lld")
     set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fuse-ld=lld")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
+
+    if (WIN32)
+        if (CMAKE_BUILD_TYPE EQUAL "RelWithDebInfo")
+            # -debug for LLD generates PDB files
+            set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-debug")
+            set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -Wl,-debug")
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-debug")
+        endif()
+    endif()
 endif()
 
 if (USE_MOLD)
@@ -77,12 +98,6 @@ if (WIN32)
   # MSVC in `Debug` config because MSVC would try to fill uninitialize memory
   # with `0xCC` but it too breaks `LLVMTableGen` which is depended on by almost
   # every component in LLVM.
-  #
-  # FIXME: (penguinliong) This is fixed in later releases of LLVM so maybe
-  # someday we can distribute `Debug` libraries, if it's ever needed.
-  if (NOT TI_LLVM_15)
-    SET(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDLL)
-  endif()
   message("CMAKE_MSVC_RUNTIME_LIBRARY: ${CMAKE_MSVC_RUNTIME_LIBRARY}")
 endif()
 
@@ -128,6 +143,15 @@ option(TI_WITH_PYTHON "Build with Python language binding" ON)
 if (TI_WITH_PYTHON AND NOT ANDROID)
     include(cmake/PythonNumpyPybind11.cmake)
 endif()
+
+if (TI_WITH_BACKTRACE)
+  add_subdirectory(external/backward_cpp)
+endif()
+
+if (TI_DISTRIBUTED_COMPILE)
+    include(cmake/Distributed.cmake)
+endif()
+
 include(cmake/TaichiCXXFlags.cmake)
 include(cmake/TaichiCore.cmake)
 

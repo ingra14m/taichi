@@ -180,7 +180,8 @@ def test_ndarray_compound_element():
     assert c.element_type.shape() == (3, 4)
 
 
-def _test_ndarray_copy_from_ndarray():
+@test_utils.test(arch=supported_archs_taichi_ndarray)
+def test_ndarray_copy_from_ndarray():
     n = 16
     a = ti.ndarray(ti.i32, shape=n)
     b = ti.ndarray(ti.i32, shape=n)
@@ -220,18 +221,7 @@ def _test_ndarray_copy_from_ndarray():
 
 
 @test_utils.test(arch=supported_archs_taichi_ndarray)
-def test_ndarray_copy_from_ndarray():
-    _test_ndarray_copy_from_ndarray()
-
-
-@test_utils.test(arch=supported_archs_taichi_ndarray,
-                 real_matrix=True,
-                 real_matrix_scalarize=True)
-def test_ndarray_copy_from_ndarray_matrix_scalarize():
-    _test_ndarray_copy_from_ndarray()
-
-
-def _test_ndarray_deepcopy():
+def test_ndarray_deepcopy():
     n = 16
     x = ti.ndarray(ti.i32, shape=n)
     x[0] = 1
@@ -326,18 +316,6 @@ def test_ndarray_rw_cache():
         c_a[None] = c_b[10]
 
 
-@test_utils.test(arch=supported_archs_taichi_ndarray)
-def test_ndarray_deepcopy():
-    _test_ndarray_deepcopy()
-
-
-@test_utils.test(arch=supported_archs_taichi_ndarray,
-                 real_matrix=True,
-                 real_matrix_scalarize=True)
-def test_ndarray_deepcopy_matrix_scalarize():
-    _test_ndarray_deepcopy()
-
-
 def _test_ndarray_numpy_io():
     n = 7
     m = 4
@@ -421,15 +399,8 @@ def test_matrix_ndarray_taichi_scope():
     _test_matrix_ndarray_taichi_scope()
 
 
-@test_utils.test(arch=[ti.cpu, ti.cuda], real_matrix=True)
+@test_utils.test(arch=[ti.cpu, ti.cuda], real_matrix_scalarize=False)
 def test_matrix_ndarray_taichi_scope_real_matrix():
-    _test_matrix_ndarray_taichi_scope()
-
-
-@test_utils.test(arch=supported_archs_taichi_ndarray,
-                 real_matrix=True,
-                 real_matrix_scalarize=True)
-def test_matrix_ndarray_taichi_scope_real_matrix_scalarize():
     _test_matrix_ndarray_taichi_scope()
 
 
@@ -454,15 +425,8 @@ def test_matrix_ndarray_taichi_scope_struct_for():
     _test_matrix_ndarray_taichi_scope_struct_for()
 
 
-@test_utils.test(arch=[ti.cpu, ti.cuda], real_matrix=True)
+@test_utils.test(arch=[ti.cpu, ti.cuda], real_matrix_scalarize=False)
 def test_matrix_ndarray_taichi_scope_struct_for_real_matrix():
-    _test_matrix_ndarray_taichi_scope_struct_for()
-
-
-@test_utils.test(arch=supported_archs_taichi_ndarray,
-                 real_matrix=True,
-                 real_matrix_scalarize=True)
-def test_matrix_ndarray_taichi_scope_struct_for_matrix_scalarize():
     _test_matrix_ndarray_taichi_scope_struct_for()
 
 
@@ -500,14 +464,7 @@ def test_vector_ndarray_taichi_scope():
     _test_vector_ndarray_taichi_scope()
 
 
-@test_utils.test(arch=supported_archs_taichi_ndarray,
-                 real_matrix=True,
-                 real_matrix_scalarize=True)
-def test_vector_ndarray_taichi_scope_matrix_scalarize():
-    _test_vector_ndarray_taichi_scope()
-
-
-@test_utils.test(arch=[ti.cpu, ti.cuda], real_matrix=True)
+@test_utils.test(arch=[ti.cpu, ti.cuda], real_matrix_scalarize=False)
 def test_vector_ndarray_taichi_scope_real_matrix():
     _test_vector_ndarray_taichi_scope()
 
@@ -577,15 +534,14 @@ def _test_arg_not_match():
         func5(x)
 
     @ti.kernel
-    def func7(a: ti.types.ndarray(field_dim=2)):
+    def func7(a: ti.types.ndarray(ndim=2)):
         pass
 
     x = ti.ndarray(ti.i32, shape=(3, ))
     with pytest.raises(
             ValueError,
             match=
-            r'Invalid argument into ti\.types\.ndarray\(\) - required field_dim'
-    ):
+            r'Invalid argument into ti\.types\.ndarray\(\) - required ndim'):
         func7(x)
 
     @ti.kernel
@@ -665,15 +621,8 @@ def test_ndarray_grouped():
     _test_ndarray_grouped()
 
 
-@test_utils.test(arch=[ti.cpu, ti.cuda], real_matrix=True)
+@test_utils.test(arch=[ti.cpu, ti.cuda], real_matrix_scalarize=False)
 def test_ndarray_grouped_real_matrix():
-    _test_ndarray_grouped()
-
-
-@test_utils.test(arch=supported_archs_taichi_ndarray,
-                 real_matrix=True,
-                 real_matrix_scalarize=True)
-def test_ndarray_grouped_real_matrix_scalarize():
     _test_ndarray_grouped()
 
 
@@ -701,8 +650,7 @@ def test_gaussian_kernel():
             -0.5 * ti.pow(x / sigma, 2)) / (sigma * ti.sqrt(2.0 * M_PI))
 
     @ti.kernel
-    def fill_gaussian_kernel(
-            ker: ti.types.ndarray(ti.f32, field_dim=1), N: ti.i32):
+    def fill_gaussian_kernel(ker: ti.types.ndarray(ti.f32, ndim=1), N: ti.i32):
         sum = 0.0
         for i in range(2 * N + 1):
             ker[i] = gaussian(i - N, ti.sqrt(N))
@@ -719,3 +667,29 @@ def test_gaussian_kernel():
     fill_gaussian_kernel(np_arr, N)
 
     assert test_utils.allclose(res, np_arr)
+
+
+@test_utils.test(arch=supported_archs_taichi_ndarray)
+def test_ndarray_numpy_matrix():
+    boundary_box_np = np.array([[0, 0, 0], [1, 1, 1]], dtype=np.float32)
+    boundary_box = ti.Vector.ndarray(3, ti.f32, shape=2)
+    boundary_box.from_numpy(boundary_box_np)
+    ref_numpy = boundary_box.to_numpy()
+
+    assert (boundary_box_np == ref_numpy).all()
+
+
+@pytest.mark.parametrize('dtype', [ti.i64, ti.u64, ti.f64])
+@test_utils.test(arch=supported_archs_taichi_ndarray,
+                 require=ti.extension.data64)
+def test_ndarray_python_scope_read_64bit(dtype):
+    @ti.kernel
+    def run(x: ti.types.ndarray()):
+        for i in x:
+            x[i] = i + ti.i64(2**40)
+
+    n = 4
+    a = ti.ndarray(dtype, shape=(n, ))
+    run(a)
+    for i in range(n):
+        assert a[i] == i + 2**40

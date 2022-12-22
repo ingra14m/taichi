@@ -14,6 +14,11 @@ setup_python
 
 [[ "$IN_DOCKER" == "true" ]] && cd taichi
 
+if [ ! -z "$AMDGPU_TEST" ]; then
+    sudo chmod 666 /dev/kfd
+    sudo chmod 666 /dev/dri/*
+fi
+
 python3 -m pip install dist/*.whl
 if [ -z "$GPU_TEST" ]; then
     python3 -m pip install -r requirements_test.txt
@@ -44,11 +49,11 @@ ti diagnose
 ti changelog
 echo "wanted archs: $TI_WANTED_ARCHS"
 
-if [ "$TI_RUN_RELEASE_TESTS" == "1" -a -z "$TI_LITE_TEST" ]; then
+if [ "$TI_RUN_RELEASE_TESTS" == "1" ]; then
     python3 -m pip install PyYAML
     git clone https://github.com/taichi-dev/taichi-release-tests
     pushd taichi-release-tests
-    git checkout v1.1.0
+    git checkout 20221221
     mkdir -p repos/taichi/python/taichi
     EXAMPLES=$(cat <<EOF | python3 | tail -n 1
 import taichi.examples
@@ -103,6 +108,9 @@ if [ -z "$GPU_TEST" ]; then
         fi
         python3 tests/run_tests.py -vr2 -t4 -k "not paddle" -a "$TI_WANTED_ARCHS"
     fi
+elif [ ! -z "$AMDGPU_TEST" ]; then
+    run-it cpu    $(nproc)
+    # run-it amdgpu 4
 else
     run-it cuda   8
     run-it cpu    $(nproc)

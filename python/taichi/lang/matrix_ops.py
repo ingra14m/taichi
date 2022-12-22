@@ -4,7 +4,8 @@ from taichi.lang.kernel_impl import func, pyfunc
 from taichi.lang.matrix import Matrix, Vector
 from taichi.lang.matrix_ops_utils import (arg_at, arg_foreach_check,
                                           assert_list, assert_tensor,
-                                          assert_vector, check_matmul, dim_lt,
+                                          assert_vector, check_matmul,
+                                          check_transpose, dim_lt,
                                           is_int_const, preconditions,
                                           same_shapes, square_matrix)
 from taichi.types.annotations import template
@@ -94,16 +95,16 @@ def determinant(mat):
     if static(shape[0] == 4):
         det = mat[0, 0] * 0  # keep type
         for i in static(range(4)):
-            det += (-1)**i * (mat[i, 0] *
-                              (E(mat, i + 1, 1, 4) *
-                               (E(mat, i + 2, 2, 4) * E(mat, i + 3, 3, 4) -
-                                E(mat, i + 3, 2, 4) * E(mat, i + 2, 3, 4)) -
-                               E(mat, i + 2, 1, 4) *
-                               (E(mat, i + 1, 2, 4) * E(mat, i + 3, 3, 4) -
-                                E(mat, i + 3, 2, 4) * E(mat, i + 1, 3, 4)) +
-                               E(mat, i + 3, 1, 4) *
-                               (E(mat, i + 1, 2, 4) * E(mat, i + 2, 3, 4) -
-                                E(mat, i + 2, 2, 4) * E(mat, i + 1, 3, 4))))
+            det = det + (-1)**i * (
+                mat[i, 0] * (E(mat, i + 1, 1, 4) *
+                             (E(mat, i + 2, 2, 4) * E(mat, i + 3, 3, 4) -
+                              E(mat, i + 3, 2, 4) * E(mat, i + 2, 3, 4)) -
+                             E(mat, i + 2, 1, 4) *
+                             (E(mat, i + 1, 2, 4) * E(mat, i + 3, 3, 4) -
+                              E(mat, i + 3, 2, 4) * E(mat, i + 1, 3, 4)) +
+                             E(mat, i + 3, 1, 4) *
+                             (E(mat, i + 1, 2, 4) * E(mat, i + 2, 3, 4) -
+                              E(mat, i + 2, 2, 4) * E(mat, i + 1, 3, 4))))
         return det
     # unreachable
     return None
@@ -142,12 +143,10 @@ def inverse(mat):
     return None
 
 
-@preconditions(assert_tensor)
+@preconditions(check_transpose)
 @pyfunc
 def transpose(mat):
     shape = static(mat.get_shape())
-    if static(len(shape) == 1):
-        return Vector([mat[i] for i in static(range(shape[0]))])
     return Matrix([[mat[i, j] for i in static(range(shape[0]))]
                    for j in static(range(shape[1]))])
 
@@ -222,7 +221,7 @@ def trace(mat):
     # TODO: get rid of static when
     # CHI IR Tensor repr is ready stable
     for i in static(range(1, shape[0])):
-        result += mat[i, i]
+        result = result + mat[i, i]
     return result
 
 
@@ -251,14 +250,14 @@ def _matmul_helper(mat_x, mat_y):
         vec_z = _filled_vector(shape_x[0], None, zero_elem)
         for i in static(range(shape_x[0])):
             for j in static(range(shape_x[1])):
-                vec_z[i] += mat_x[i, j] * mat_y[j]
+                vec_z[i] = vec_z[i] + mat_x[i, j] * mat_y[j]
         return vec_z
     zero_elem = mat_x[0, 0] * mat_y[0, 0] * 0  # for correct return type
     mat_z = _filled_matrix(shape_x[0], shape_y[1], None, zero_elem)
     for i in static(range(shape_x[0])):
         for j in static(range(shape_y[1])):
             for k in static(range(shape_x[1])):
-                mat_z[i, j] += mat_x[i, k] * mat_y[k, j]
+                mat_z[i, j] = mat_z[i, j] + mat_x[i, k] * mat_y[k, j]
     return mat_z
 
 

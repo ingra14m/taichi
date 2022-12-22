@@ -9,7 +9,7 @@ CompileConfig::CompileConfig() {
   simd_width = default_simd_width(arch);
   opt_level = 1;
   external_optimization_level = 3;
-  packed = false;
+  packed = true;
   print_ir = false;
   print_preprocessed_ir = false;
   print_accessor_ir = false;
@@ -45,8 +45,7 @@ CompileConfig::CompileConfig() {
   make_block_local = true;
   detect_read_only = true;
   ndarray_use_cached_allocator = true;
-  real_matrix = false;
-  real_matrix_scalarize = false;
+  real_matrix_scalarize = true;
 
   saturating_grid_dim = 0;
   max_block_dim = 0;

@@ -553,7 +553,7 @@ class MatrixFieldExpression : public Expression {
 
 /**
  * Creating a local matrix;
- * lowered from ti.Matrix with real_matrix=True
+ * lowered from ti.Matrix
  */
 class MatrixExpression : public Expression {
  public:
@@ -821,6 +821,21 @@ class FuncCallExpression : public Expression {
   TI_DEFINE_ACCEPT_FOR_EXPRESSION
 };
 
+class GetElementExpression : public Expression {
+ public:
+  Expr src;
+  int index;
+
+  void type_check(CompileConfig *config) override;
+
+  GetElementExpression(const Expr &src, int index) : src(src), index(index) {
+  }
+
+  void flatten(FlattenContext *ctx) override;
+
+  TI_DEFINE_ACCEPT_FOR_EXPRESSION
+};
+
 // Mesh related.
 
 class MeshPatchIndexExpression : public Expression {
@@ -1052,8 +1067,8 @@ class FrontendContext {
   }
 };
 
-void flatten_lvalue(Expr expr, Expression::FlattenContext *ctx);
+Stmt *flatten_lvalue(Expr expr, Expression::FlattenContext *ctx);
 
-void flatten_rvalue(Expr expr, Expression::FlattenContext *ctx);
+Stmt *flatten_rvalue(Expr expr, Expression::FlattenContext *ctx);
 
 }  // namespace taichi::lang

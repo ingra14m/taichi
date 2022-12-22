@@ -1,26 +1,30 @@
 import ast
 import functools
 import inspect
+import operator
 import re
 import sys
 import textwrap
+import warnings
 import weakref
 
 import numpy as np
 import taichi.lang
 from taichi._lib import core as _ti_core
 from taichi.lang import impl, ops, runtime_ops
+from taichi.lang._wrap_inspect import getsourcefile, getsourcelines
 from taichi.lang.ast import (ASTTransformerContext, KernelSimplicityASTChecker,
                              transform_tree)
 from taichi.lang.ast.ast_transformer_utils import ReturnStatus
 from taichi.lang.enums import AutodiffMode, Layout
 from taichi.lang.exception import (TaichiCompilationError, TaichiRuntimeError,
                                    TaichiRuntimeTypeError, TaichiSyntaxError,
-                                   handle_exception_from_cpp)
+                                   TaichiTypeError, handle_exception_from_cpp)
 from taichi.lang.expr import Expr
 from taichi.lang.kernel_arguments import KernelArgument
 from taichi.lang.matrix import Matrix, MatrixType
-from taichi.lang.shell import _shell_pop_print, oinspect
+from taichi.lang.shell import _shell_pop_print
+from taichi.lang.struct import StructType
 from taichi.lang.util import (cook_dtype, has_paddle, has_pytorch,
                               to_taichi_type)
 from taichi.types import (ndarray_type, primitive_types, sparse_matrix_builder,
@@ -112,8 +116,8 @@ def _get_tree_and_ctx(self,
                       args=None,
                       ast_builder=None,
                       is_real_function=False):
-    file = oinspect.getsourcefile(self.func)
-    src, start_lineno = oinspect.getsourcelines(self.func)
+    file = getsourcefile(self.func)
+    src, start_lineno = getsourcelines(self.func)
     src = [textwrap.fill(line, tabsize=4, width=9999) for line in src]
     tree = ast.parse(textwrap.dedent("\n".join(src)))
 
@@ -121,7 +125,6 @@ def _get_tree_and_ctx(self,
     func_body.decorator_list = []
 
     global_vars = _get_global_vars(self.func)
-
     for i, arg in enumerate(func_body.args.args):
         anno = arg.annotation
         if isinstance(anno, ast.Name):
@@ -255,8 +258,8 @@ class Func:
                 elif isinstance(anno, primitive_types.RefType):
                     non_template_args.append(
                         _ti_core.make_reference(args[i].ptr))
-                elif impl.current_cfg().real_matrix and isinstance(
-                        args[i], impl.Expr) and args[i].ptr.is_tensor():
+                elif isinstance(args[i],
+                                impl.Expr) and args[i].ptr.is_tensor():
                     non_template_args.extend([
                         Expr(x) for x in impl.get_runtime().prog.
                         current_ast_builder().expand_expr([args[i].ptr])
@@ -265,9 +268,18 @@ class Func:
                     non_template_args.append(args[i])
         non_template_args = impl.make_expr_group(non_template_args,
                                                  real_func_arg=True)
-        return Expr(
+        func_call = Expr(
             _ti_core.make_func_call_expr(
                 self.taichi_functions[key.instance_id], non_template_args))
+        impl.get_runtime().prog.current_ast_builder().insert_expr_stmt(
+            func_call.ptr)
+        if self.return_type is None:
+            return None
+        if id(self.return_type) in primitive_types.type_ids:
+            return Expr(_ti_core.make_get_element_expr(func_call.ptr, 0))
+        if isinstance(self.return_type, StructType):
+            return self.return_type.from_real_func_ret(func_call)[0]
+        raise TaichiTypeError(f"Unsupported return type: {self.return_type}")
 
     def do_compile(self, key, args):
         tree, ctx = _get_tree_and_ctx(self,
@@ -376,7 +388,7 @@ class TaichiCallableTemplateMapper:
             # [Primitive arguments] Return the value
             return arg
         if isinstance(anno, texture_type.TextureType):
-            return arg.num_dims,
+            return arg.num_dims, arg.dtype
         if isinstance(anno, texture_type.RWTextureType):
             # (penguinliong) '0' is the assumed LOD level. We currently don't
             # support mip-mapping.
@@ -644,6 +656,11 @@ class Kernel:
                     # so that it only holds "real" array shapes.
                     is_soa = needed.layout == Layout.SOA
                     array_shape = v.shape
+                    if functools.reduce(operator.mul, array_shape,
+                                        1) > np.iinfo(np.int32).max:
+                        warnings.warn(
+                            "Ndarray index might be out of int32 boundary but int64 indexing is not supported yet."
+                        )
                     if needed.dtype is None or id(
                             needed.dtype) in primitive_types.type_ids:
                         element_dim = 0

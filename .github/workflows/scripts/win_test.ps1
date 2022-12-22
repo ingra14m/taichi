@@ -66,13 +66,13 @@ RunIt vulkan 4
 
 Invoke python tests/run_tests.py -vr2 -t1 -k "torch" -a "$env:TI_WANTED_ARCHS"
 
-if ("$env:TI_RUN_RELEASE_TESTS" -eq "1" -and -not "$env:TI_LITE_TEST") {
+if ("$env:TI_RUN_RELEASE_TESTS" -eq "1") {
     Info "Running release tests"
     # release tests
     Invoke pip install PyYAML
     Invoke git clone https://github.com/taichi-dev/taichi-release-tests
     Push-Location taichi-release-tests
-    Invoke git checkout v1.1.0
+    Invoke git checkout 20221221
     mkdir -p repos/taichi/python/taichi
     $EXAMPLES = & python -c 'import taichi.examples as e; print(e.__path__._path[0])' | Select-Object -Last 1
     Push-Location repos
